@@ -3,7 +3,7 @@ import logging
 import sys
 from pathlib import Path
 
-from face_detection import match_reference_image_in_camera
+from main import match_reference_image_in_camera
 
 # Set up logging for clean terminal output
 logging.basicConfig(

@@ -8,7 +8,7 @@ import socketio
 from aiohttp import web
 import asyncio
 
-from face_detection import (
+from main import (
     load_face_cascade,
     detect_eyes,
     classify_eye_state,
