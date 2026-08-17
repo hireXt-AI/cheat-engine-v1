@@ -67,12 +67,12 @@ Give the AI interviewer live proctoring during the interview:
 
 ## 6. Work items
 
-- [ ] Rewrite `stream_server.py` (transport + per-frame v1 detection + CSV + data-channel publish).
-- [ ] Confirm `main.py` import is safe (no module-level camera/mic side effects) — verified safe.
-- [ ] Wire `runner.sh` to start the new server (already points at `stream_server.py`).
-- [ ] Jarvis agent: ensure `cheating_status`/`trigger` over data channel maps to
-      `_inject_system_context` (already wired for `cheating_status`).
-- [ ] Add `CHEATING_ENGINE_VERSION` switch / enable flag in `.env` + docs.
+- [x] Rewrite `stream_server.py` (transport + per-frame v1 detection + CSV + data-channel publish).
+- [x] Confirm `main.py` import is safe (no module-level camera/mic side effects) — verified safe.
+- [x] Wire `runner.sh` to start the new server (already points at `stream_server.py`).
+- [x] Jarvis agent: ensure `cheating_status`/`trigger` over data channel maps to
+      `_inject_system_context` (already wired for `cheating_status`; `trigger` added).
+- [x] Add `CHEATING_ENGINE_VERSION` switch / enable flag in `.env` + docs.
 - [ ] Deploy v1 to Node server + install v1 deps (mediapipe, face_recognition, dlib, opencv).
 - [ ] Test end-to-end with a real LiveKit room.
 

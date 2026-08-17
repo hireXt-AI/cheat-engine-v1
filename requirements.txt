@@ -2,6 +2,7 @@ numpy
 python-socketio==5.11.1
 aiohttp==3.9.5
 opencv-python 
+livekit
 mediapipe ==0.10.21
 face_recognition 
 dlib ==20.0.1
@@ -11,4 +12,4 @@ colorama
 face-recognition-models
 face_recognition
 PyAudio
-
+git+https://github.com/ageitgey/face_recognition_models
