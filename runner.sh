@@ -6,10 +6,19 @@ cd "$DIR"
 
 echo "=== Cheating Detection Engine ==="
 
+# Prefer Python 3.11: the pinned mediapipe==0.10.21 / dlib==20.0.1 only have
+# wheels up to Python 3.11 (no wheels for 3.12/3.13+). Fall back to python3 for
+# environments where only the system default is available.
+PYTHON_BIN="${PYTHON_BIN:-python3.11}"
+if ! command -v "$PYTHON_BIN" > /dev/null 2>&1; then
+  echo "WARNING: $PYTHON_BIN not found; falling back to python3 (mediapipe/dlib install may fail on 3.12+)"
+  PYTHON_BIN="python3"
+fi
+
 # Install dependencies if needed
 if [ ! -d ".venv" ]; then
-  echo "Creating virtual environment..."
-  python3 -m venv .venv
+  echo "Creating virtual environment with $PYTHON_BIN..."
+  "$PYTHON_BIN" -m venv .venv
 fi
 
 source .venv/bin/activate
