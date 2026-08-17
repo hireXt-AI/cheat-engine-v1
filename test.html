@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Cheating Engine MVP</title>
+  <style>
+    body { background: #111; color: #fff; font-family: system-ui; margin: 2rem; }
+    video, #overlay { width: 360px; border-radius: 8px; }
+    video { border: 2px solid #333; }
+    #status { margin-top: 1rem; font-family: monospace; white-space: pre-line; font-size: 13px; line-height: 1.7; }
+    .ok { color: #4ade80; } .warn { color: #fbbf24; } .bad { color: #f87171; }
+    #score-bar { width: 360px; height: 8px; background: #333; border-radius: 4px; margin-top: 0.5rem; }
+    #score-fill { height: 100%; border-radius: 4px; transition: width 0.3s, background 0.3s; }
+    #flags { margin-top: 0.5rem; font-size: 12px; }
+    .flag { display: inline-block; background: #f8717133; color: #f87171; padding: 2px 8px; border-radius: 4px; margin: 2px; font-size: 11px; }
+    #recording-warn { display: none; background: #dc2626; color: #fff; padding: 8px 16px; border-radius: 6px; margin-top: 1rem; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>Cheating Detection — MVP</h2>
+  <div style="position:relative;display:inline-block">
+    <video id="cam" autoplay muted playsinline></video>
+    <canvas id="overlay" style="position:absolute;top:0;left:0;width:360px;pointer-events:none"></canvas>
+  </div>
+  <div id="score-bar"><div id="score-fill"></div></div>
+  <div id="flags"></div>
+  <div id="recording-warn">⚠️ Screen recording detected!</div>
+  <div id="cheating-warn" style="display:none;background:#dc2626;color:#fff;padding:12px 20px;border-radius:8px;margin-top:1rem;">
+    <strong>⚠️ CHEATING DETECTED</strong>
+    <ul id="cheating-reasons" style="margin:8px 0 0 16px;font-size:13px;"></ul>
+  </div>
+  <div id="status">Connecting...</div>
+
+  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+  <script>
+    const socket = io('/interview', { transports: ['websocket'] });
+    const video = document.getElementById('cam');
+    const statusEl = document.getElementById('status');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    let streaming = false;
+
+    // ── Screen recording detection ──────────────────────────────────────────
+    function detectScreenRecording() {
+      // 1. Display capture API check
+      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+        // Can't detect active capture, but we monitor for permission grants
+      }
+
+      // 2. Detect window resize patterns (OBS preview) or frame rate drops
+      let lastTime = performance.now();
+      let drops = 0;
+      function checkFrameDrop(ts) {
+        const delta = ts - lastTime;
+        if (delta > 100) drops++; // frame took >100ms = possible recording overhead
+        if (drops > 10) {
+          socket.emit('screen_recording', { detail: 'frame_drops' });
+          document.getElementById('recording-warn').style.display = 'block';
+          drops = 0;
+        }
+        lastTime = ts;
+        requestAnimationFrame(checkFrameDrop);
+      }
+      requestAnimationFrame(checkFrameDrop);
+
+      // 3. Detect Picture-in-Picture or visibility changes suggesting screen share
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          socket.emit('screen_recording', { detail: 'tab_hidden' });
+        }
+      });
+
+      // 4. Detect if window is being captured (experimental)
+      if (window.screen && window.screen.isExtended !== undefined) {
+        // Multi-monitor — higher risk
+      }
+    }
+
+    socket.on('connect', async () => {
+      statusEl.textContent = 'Connected. Starting camera...';
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 640, facingMode: 'user' } });
+      video.srcObject = stream;
+      streaming = true;
+      detectScreenRecording();
+      sendFrames();
+    });
+
+    function sendFrames() {
+      if (!streaming) return;
+      if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+        canvas.width = 360;
+        canvas.height = (video.videoHeight / video.videoWidth) * 360;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(blob => {
+          if (blob && socket.connected) {
+            blob.arrayBuffer().then(buf => {
+              socket.emit('video_frame', { image: buf, sessionId: 'test' });
+            });
+          }
+        }, 'image/jpeg', 0.6);
+      }
+      setTimeout(sendFrames, 200);
+    }
+
+    socket.on('cheating_status', data => {
+      // Status text
+      statusEl.innerHTML =
+        `Person:     <span class="${data.person_in_frame ? 'ok' : 'bad'}">${data.person_in_frame ? '✓' : '✗'}</span> (${data.face_count} face${data.face_count !== 1 ? 's' : ''})\n` +
+        `Match:      <span class="${data.face_match ? 'ok' : 'bad'}">${data.face_match ? '✓' : '✗'}</span> dist=${data.match_distance || '-'}\n` +
+        `Light:      <span class="${data.light_on ? 'ok' : 'warn'}">${data.light_on ? 'ON' : 'OFF'}${data.low_light ? ' (low)' : ''}</span>\n` +
+        `Eyes:       ${data.eye_state}\n` +
+        `Gaze:       <span class="${data.gaze === 'Looking at screen' ? 'ok' : 'warn'}">${data.gaze}</span>` +
+        (data.gaze_away_duration > 0 ? ` <span class="warn">(${data.gaze_away_duration}s away)</span>` : '') + '\n' +
+        `Face gone:  ${data.face_gone_duration > 0 ? `<span class="bad">${data.face_gone_duration}s</span>` : '-'}\n` +
+        `Score:      <span class="${data.suspicion_score > 30 ? 'bad' : data.suspicion_score > 10 ? 'warn' : 'ok'}">${data.suspicion_score}</span>`;
+
+      // Score bar
+      const fill = document.getElementById('score-fill');
+      fill.style.width = Math.min(data.suspicion_score, 100) + '%';
+      fill.style.background = data.suspicion_score > 50 ? '#dc2626' : data.suspicion_score > 20 ? '#f59e0b' : '#22c55e';
+
+      // Flags
+      const flagsEl = document.getElementById('flags');
+      flagsEl.innerHTML = data.flags.map(f => `<span class="flag">${f}</span>`).join('');
+
+      // Cheating warning at max score
+      if (data.suspicion_score >= 100) {
+        document.getElementById('cheating-warn').style.display = 'block';
+        const reasons = [...new Set(data.events.map(e => e.type))];
+        const labels = {
+          multi_face: 'Multiple people detected',
+          gaze_away: 'Looking away from screen too long',
+          face_gone: 'Face disappeared for extended time',
+          identity_mismatch: 'Face does not match registered identity',
+          screen_recording: 'Screen recording / tab switch detected',
+          screenshot: 'Evidence captured',
+        };
+        document.getElementById('cheating-reasons').innerHTML =
+          reasons.map(r => `<li>${labels[r] || r}</li>`).join('');
+      }
+
+      // Draw boxes
+      const ov = document.getElementById('overlay');
+      const vw = video.videoWidth, vh = video.videoHeight;
+      ov.width = 360; ov.height = (vh / vw) * 360;
+      const oc = ov.getContext('2d');
+      oc.clearRect(0, 0, ov.width, ov.height);
+
+      if (data.face_box) {
+        const [fx, fy, fw, fh] = data.face_box;
+        oc.strokeStyle = data.face_match ? '#4ade80' : '#f87171';
+        oc.lineWidth = 2;
+        oc.strokeRect(fx * ov.width, fy * ov.height, fw * ov.width, fh * ov.height);
+      }
+      if (data.eye_boxes) {
+        oc.strokeStyle = '#38bdf8';
+        oc.lineWidth = 1;
+        data.eye_boxes.forEach(([ex, ey, ew, eh]) => {
+          oc.strokeRect(ex * ov.width, ey * ov.height, ew * ov.width, eh * ov.height);
+        });
+      }
+    });
+
+    socket.on('disconnect', () => { statusEl.textContent = 'Disconnected'; });
+  </script>
+</body>
+</html>

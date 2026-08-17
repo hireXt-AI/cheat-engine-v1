@@ -1,0 +1,4 @@
+opencv-python
+numpy
+python-socketio==5.11.1
+aiohttp==3.9.5

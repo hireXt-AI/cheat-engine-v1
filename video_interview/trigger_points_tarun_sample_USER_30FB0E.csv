@@ -1,0 +1,44 @@
+User_ID,Timestamp,HR_Identification,AI_Warning
+USER_30FB0E,0.00s,User session started (Candidate: Tarun Sample),No violation detected yet
+USER_30FB0E,0.22s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_30FB0E,0.22s,Head turned up,please focused on screen don't look up
+USER_30FB0E,3.25s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_30FB0E,3.25s,Head turned left,please focused on screen don't look left
+USER_30FB0E,5.33s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_30FB0E,6.25s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_30FB0E,6.25s,Head turned left,please focused on screen don't look left
+USER_30FB0E,7.10s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_30FB0E,9.26s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_30FB0E,9.61s,Head turned up,please focused on screen don't look up
+USER_30FB0E,12.29s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_30FB0E,12.75s,Head turned up,please focused on screen don't look up
+USER_30FB0E,13.19s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_30FB0E,15.30s,Lighting Violation: WARN: BACKGROUND LIGHT IS LOW,Please adjust lighting to face the camera in normal light
+USER_30FB0E,16.17s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_30FB0E,16.17s,Head turned up,please focused on screen don't look up
+USER_30FB0E,30.94s,Head turned up,please focused on screen don't look up
+USER_30FB0E,30.98s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_30FB0E,32.27s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_30FB0E,33.29s,Multiple people detected (2 people),"Only candidate is allowed in frame, clear other persons"
+USER_30FB0E,33.96s,Head turned up,please focused on screen don't look up
+USER_30FB0E,33.99s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_30FB0E,39.99s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_30FB0E,44.26s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_30FB0E,47.25s,Head turned up,please focused on screen don't look up
+USER_30FB0E,48.49s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_30FB0E,51.98s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_30FB0E,55.02s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_30FB0E,55.15s,Head turned up,please focused on screen don't look up
+USER_30FB0E,58.06s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_30FB0E,68.39s,Head turned up,please focused on screen don't look up
+USER_30FB0E,68.46s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_30FB0E,69.95s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_30FB0E,70.75s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_30FB0E,71.48s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_30FB0E,71.95s,Head turned left,please focused on screen don't look left
+USER_30FB0E,81.32s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_30FB0E,84.25s,Head turned left,please focused on screen don't look left
+USER_30FB0E,84.35s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_30FB0E,87.37s,Head turned left,please focused on screen don't look left
+USER_30FB0E,87.37s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_30FB0E,90.85s,Head turned up,please focused on screen don't look up

@@ -1,0 +1,178 @@
+User_ID,Timestamp,HR_Identification,AI_Warning
+USER_426939,0.00s,User session started (Candidate: Tarun Sample),No violation detected yet
+USER_426939,0.21s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,0.67s,Head turned left,please focused on screen don't look left
+USER_426939,2.11s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,2.98s,Multiple people detected (2 people),"Only candidate is allowed in frame, clear other persons"
+USER_426939,3.23s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,3.68s,Head turned left,please focused on screen don't look left
+USER_426939,5.12s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_426939,6.25s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,6.70s,Head turned left,please focused on screen don't look left
+USER_426939,7.32s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,9.26s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,9.72s,Head turned left,please focused on screen don't look left
+USER_426939,12.28s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,12.74s,Head turned left,please focused on screen don't look left
+USER_426939,15.28s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,15.75s,Head turned left,please focused on screen don't look left
+USER_426939,17.05s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,17.25s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_426939,18.28s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,19.29s,Head turned left,please focused on screen don't look left
+USER_426939,20.05s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,21.29s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,22.30s,Head turned left,please focused on screen don't look left
+USER_426939,24.31s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,25.30s,Head turned left,please focused on screen don't look left
+USER_426939,27.15s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,27.34s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,28.31s,Head turned left,please focused on screen don't look left
+USER_426939,30.34s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,31.31s,Head turned left,please focused on screen don't look left
+USER_426939,31.43s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,33.35s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,34.34s,Head turned left,please focused on screen don't look left
+USER_426939,35.64s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,36.38s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,37.36s,Head turned left,please focused on screen don't look left
+USER_426939,39.38s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,40.37s,Head turned left,please focused on screen don't look left
+USER_426939,40.64s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_426939,41.22s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_426939,42.40s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,43.55s,Head turned left,please focused on screen don't look left
+USER_426939,44.24s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,45.41s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,46.57s,Head turned left,please focused on screen don't look left
+USER_426939,48.44s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,49.59s,Head turned left,please focused on screen don't look left
+USER_426939,51.46s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,52.61s,Head turned left,please focused on screen don't look left
+USER_426939,54.47s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,55.64s,Head turned left,please focused on screen don't look left
+USER_426939,55.80s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_426939,57.48s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,58.68s,Head turned left,please focused on screen don't look left
+USER_426939,60.01s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,60.51s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,62.77s,Head turned down,please focused on screen don't look down
+USER_426939,63.52s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,65.79s,Head turned right,please focused on screen don't look right
+USER_426939,66.50s,Candidate eyes closed continuously for over 5 seconds,Please keep your eyes open and stay attentive
+USER_426939,66.54s,Lighting Violation: WARN: BACKGROUND LIGHT IS LOW,Please adjust lighting to face the camera in normal light
+USER_426939,68.80s,Head turned right,please focused on screen don't look right
+USER_426939,69.57s,Lighting Violation: WARN: BACKGROUND LIGHT IS LOW,Please adjust lighting to face the camera in normal light
+USER_426939,71.84s,Head turned right,please focused on screen don't look right
+USER_426939,72.57s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,74.73s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,74.85s,Head turned left,please focused on screen don't look left
+USER_426939,75.57s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,77.36s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_426939,77.87s,Head turned left,please focused on screen don't look left
+USER_426939,77.96s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,78.60s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,80.88s,Head turned left,please focused on screen don't look left
+USER_426939,81.62s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,84.63s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,85.48s,Head turned right,please focused on screen don't look right
+USER_426939,87.65s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,89.54s,Head turned left,please focused on screen don't look left
+USER_426939,90.00s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,90.30s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_426939,90.66s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,92.55s,Head turned left,please focused on screen don't look left
+USER_426939,93.03s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,93.07s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_426939,93.70s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,95.56s,Head turned left,please focused on screen don't look left
+USER_426939,96.07s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,96.72s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,98.58s,Head turned left,please focused on screen don't look left
+USER_426939,98.76s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_426939,99.07s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,99.74s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,101.59s,Head turned left,please focused on screen don't look left
+USER_426939,101.93s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_426939,102.09s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,102.20s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_426939,102.76s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,104.62s,Head turned left,please focused on screen don't look left
+USER_426939,105.13s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,105.78s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,107.64s,Head turned left,please focused on screen don't look left
+USER_426939,108.79s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,109.66s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,109.90s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_426939,110.66s,Head turned left,please focused on screen don't look left
+USER_426939,111.79s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,112.70s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,113.68s,Head turned left,please focused on screen don't look left
+USER_426939,114.73s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,114.81s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,114.99s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_426939,115.71s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,116.69s,Head turned left,please focused on screen don't look left
+USER_426939,117.84s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,118.03s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_426939,118.73s,Dark sunglasses or covered eyes detected,"Please remove dark glasses, eyes must be clearly visible"
+USER_426939,119.06s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,119.71s,Head turned left,please focused on screen don't look left
+USER_426939,120.85s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,121.03s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_426939,122.72s,Head turned left,please focused on screen don't look left
+USER_426939,122.98s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,123.85s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,125.33s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_426939,125.82s,Head turned left,please focused on screen don't look left
+USER_426939,126.82s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,126.86s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,127.80s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_426939,128.86s,Head turned left,please focused on screen don't look left
+USER_426939,129.36s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_426939,129.89s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,130.36s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,131.87s,Head turned left,please focused on screen don't look left
+USER_426939,132.89s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,133.37s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,134.89s,Head turned left,please focused on screen don't look left
+USER_426939,135.92s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,137.94s,Head turned left,please focused on screen don't look left
+USER_426939,138.94s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,139.10s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_426939,139.24s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_426939,140.95s,Head turned left,please focused on screen don't look left
+USER_426939,141.98s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,142.04s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_426939,142.93s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,144.00s,Head turned left,please focused on screen don't look left
+USER_426939,144.99s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,145.56s,Unrecognized person in candidate position,"Verification failed, candidate must be present"
+USER_426939,145.98s,Candidate missing from frame,Please stay in front of the camera at all times
+USER_426939,147.05s,Head turned left,please focused on screen don't look left
+USER_426939,148.30s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,150.27s,Head turned left,please focused on screen don't look left
+USER_426939,150.90s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,151.32s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,153.28s,Head turned left,please focused on screen don't look left
+USER_426939,154.42s,Lighting Violation: WARN: BACKGROUND LIGHT IS LOW,Please adjust lighting to face the camera in normal light
+USER_426939,154.42s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,156.33s,Head turned left,please focused on screen don't look left
+USER_426939,157.42s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,157.58s,looking down side repeadliy 6 time,please focused on screen don't look down
+USER_426939,159.36s,Head turned left,please focused on screen don't look left
+USER_426939,160.43s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,162.41s,Head turned left,please focused on screen don't look left
+USER_426939,163.45s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,163.59s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_426939,165.42s,Head turned left,please focused on screen don't look left
+USER_426939,166.45s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,167.94s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,168.45s,Head turned left,please focused on screen don't look left
+USER_426939,169.46s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,171.46s,Head turned left,please focused on screen don't look left
+USER_426939,172.48s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
+USER_426939,172.85s,No natural eye blink detected for over 8 seconds,Please blink naturally and look at the screen
+USER_426939,174.46s,Head turned left,please focused on screen don't look left
+USER_426939,174.62s,looking right side repeadliy 6 time,please focused on screen don't look right
+USER_426939,175.49s,Lighting Violation: WARN: FRONT LIGHT LOW,Please adjust lighting to face the camera in normal light
