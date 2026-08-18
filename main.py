@@ -506,7 +506,7 @@ def start_interview_recording(reference_image_path: Path, match_tolerance=0.6, v
     EAR_CLOSED_THRESHOLD = 0.18
     eye_closed_start_time = None
 
-    NO_BLINK_WARN_SECONDS = 8.0
+    NO_BLINK_WARN_SECONDS = 60.0
     last_blink_timestamp = time.time()
 
     glasses_consecutive_frames = 0

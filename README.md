@@ -1,6 +1,6 @@
-Face Detection & Interview Monitoring System
+# Face Detection & Interview Monitoring System
 
-A Python-based real-time face detection and monitoring system built with OpenCV and Haar Cascades. The system supports face detection, reference-image matching, eye-state monitoring, lighting detection, and eyeball/screen-gaze tracking.
+## A Python-based real-time face detection and monitoring system built with OpenCV and Haar Cascades. The system supports face detection, reference-image matching, eye-state monitoring, lighting detection, and eyeball/screen-gaze tracking.
 
 Features
 Face detection using OpenCV Haar Cascades
@@ -22,7 +22,10 @@ Install the required dependencies:
 pip install -r requirements.txt
 Usage
 1. Detect Faces in an Image
+
+```
 python face_detection.py --image path/to/your_image.jpg
+```
 
 The system will detect faces and save the annotated image as:
 
@@ -52,7 +55,9 @@ Screen-gaze tracking
 
 You can specify a custom output filename for static image detection:
 
+```
 python face_detection.py --image path/to/your_image.jpg --output output_file.jpg
+```
 Face Matching Parameters
 
 The matching behavior can be customized using:
