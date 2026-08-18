@@ -240,41 +240,47 @@ class LiveKitProctor:
                 # Agent voice track — ignore (not the candidate).
                 return
             if track.kind == rtc.TrackKind.KIND_VIDEO:
-                track.add_listener(self._on_candidate_video)
                 print(
                     f"[PROCTOR] Subscribed to candidate video track "
                     f"({participant.identity}, sid={publication.sid if publication else '?'}) — "
                     f"tracking started"
                 )
+                asyncio.create_task(self._consume_video(track))
             else:
                 print(f"[PROCTOR] Subscribed to candidate audio track (ignored for detection)")
         except Exception as e:
             print(f"[PROCTOR] track_subscribed error: {e}")
 
-    def _on_candidate_video(self, event):
+    async def _consume_video(self, track):
+        """Consume video frames via VideoStream (the livekit SDK 1.x way to read
+        remote video — RemoteVideoTrack has no add_listener)."""
         try:
-            if self._processing:
-                return
-            frame = getattr(event, "frame", None)
-            if frame is None:
-                return
-            if self._logged_frame_info is False:
+            stream = rtc.VideoStream(track, capacity=1)
+            async for event in stream:
+                if self._processing:
+                    continue
+                frame = getattr(event, "frame", None)
+                if frame is None:
+                    continue
+                if self._logged_frame_info is False:
+                    try:
+                        print(
+                            f"[PROCTOR] Video frame arriving: {frame.width}x{frame.height} "
+                            f"type={rtc.VideoBufferType.Name(frame.type) if hasattr(rtc.VideoBufferType, 'Name') else frame.type}"
+                        )
+                    except Exception:
+                        pass
+                    self._logged_frame_info = True
+                bgr = self._frame_to_bgr(frame)
+                if bgr is None:
+                    continue
+                self._processing = True
                 try:
-                    print(
-                        f"[PROCTOR] Video frame arriving: {frame.width}x{frame.height} "
-                        f"type={rtc.VideoBufferType.Name(frame.type) if hasattr(rtc.VideoBufferType, 'Name') else frame.type}"
-                    )
-                except Exception:
-                    pass
-                self._logged_frame_info = True
-            bgr = self._frame_to_bgr(frame)
-            if bgr is None:
-                return
-            self._processing = True
-            asyncio.create_task(self._process_video(bgr))
+                    await self._process_video(bgr)
+                finally:
+                    self._processing = False
         except Exception as e:
-            self._processing = False
-            print(f"[PROCTOR] video error: {e}")
+            print(f"[PROCTOR] video stream ended/error: {e}")
 
     async def _process_video(self, bgr):
         try:
