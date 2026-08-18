@@ -66,6 +66,24 @@ import socketio
 
 
 # ── Server setup ─────────────────────────────────────────────────────────────
+def _json_default(o):
+    """json.dumps default: make numpy scalar types JSON-serializable."""
+    if isinstance(o, np.bool_):
+        return bool(o)
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.floating):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return o
+
+
+def _json_safe(data):
+    """Deep-copy `data` with numpy scalars converted to native Python types."""
+    return json.loads(json.dumps(data, default=_json_default))
+
+
 sio = socketio.AsyncServer(async_mode='aiohttp', cors_allowed_origins='*')
 app = web.Application()
 sio.attach(app)
@@ -163,6 +181,7 @@ class LiveKitProctor:
         self._log_min_interval = 5.0
         self._logged_frame_info = False
         self._session = None
+        self._stopped = False
 
         # MediaPipe solvers are created once and reused across frames.
         import mediapipe as mp
@@ -176,6 +195,44 @@ class LiveKitProctor:
 
         self.room.on("track_subscribed", self._on_track_subscribed)
         self.room.on("track_subscription_failed", self._on_track_subscription_failed)
+        self.room.on("participant_disconnected", self._on_participant_disconnected)
+        self.room.on("disconnected", self._on_disconnected)
+
+    def _on_participant_disconnected(self, participant, *_):
+        try:
+            if participant is not None and participant.identity == self.candidate_identity:
+                print(
+                    f"[PROCTOR] Candidate left room — stopping proctor for {self.session_id}"
+                )
+                asyncio.create_task(self._cleanup())
+        except Exception as e:
+            print(f"[PROCTOR] participant_disconnected handler error: {e}")
+
+    def _on_disconnected(self, *_):
+        print(f"[PROCTOR] Room disconnected — cleaning up {self.session_id}")
+        asyncio.create_task(self._cleanup())
+
+    async def _cleanup(self):
+        """Deregister the proctor and release resources so the session stops
+        appearing in the admin live view once the interview is over."""
+        try:
+            if self._stopped:
+                return
+            self._stopped = True
+            proctors.pop(self.session_id, None)
+            latest_frames.pop(self.session_id, None)
+            try:
+                self._face_det.close()
+                self._face_mesh.close()
+            except Exception:
+                pass
+            try:
+                await self.room.disconnect()
+            except Exception:
+                pass
+            print(f"[PROCTOR] Proctor stopped for {self.session_id}")
+        except Exception as e:
+            print(f"[PROCTOR] cleanup error: {e}")
 
     def _on_track_subscription_failed(self, participant, track_sid, error):
         try:
@@ -204,7 +261,7 @@ class LiveKitProctor:
         asyncio.create_task(self._room_state_loop())
 
     async def _room_state_loop(self):
-        while True:
+        while not self._stopped:
             self._ensure_candidate_video_subscription()
             now = time.time()
             if now - self._last_room_log_time >= 10:
@@ -268,6 +325,8 @@ class LiveKitProctor:
         try:
             stream = rtc.VideoStream(track, capacity=1)
             async for event in stream:
+                if self._stopped:
+                    break
                 if self._processing:
                     continue
                 frame = getattr(event, "frame", None)
@@ -362,14 +421,16 @@ class LiveKitProctor:
 
     async def _publish_status(self, result):
         try:
-            payload = json.dumps({"type": "cheating_status", **result}).encode("utf-8")
+            payload = json.dumps(
+                {"type": "cheating_status", **result}, default=_json_default
+            ).encode("utf-8")
             await self.room.local_participant.publish_data(payload, reliable=True)
         except Exception as e:
             print(f"[PROCTOR] publish status error: {e}")
 
     async def _publish_trigger(self, trigger):
         try:
-            payload = json.dumps({"type": "trigger", **trigger}).encode("utf-8")
+            payload = json.dumps({"type": "trigger", **trigger}, default=_json_default).encode("utf-8")
             await self.room.local_participant.publish_data(payload, reliable=True)
         except Exception as e:
             print(f"[PROCTOR] publish trigger error: {e}")
@@ -396,12 +457,7 @@ class LiveKitProctor:
         return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
 
     async def stop(self):
-        try:
-            self._face_det.close()
-            self._face_mesh.close()
-            await self.room.disconnect()
-        except Exception as e:
-            print(f"[PROCTOR] disconnect error: {e}")
+        await self._cleanup()
 
 
 # ── Detection pipeline (v1) ──────────────────────────────────────────────────
@@ -778,14 +834,14 @@ async def get_report(request):
     if not session:
         return web.json_response({"error": "Session not found"}, status=404)
 
-    return web.json_response({
+    return web.json_response(_json_safe({
         "sessionId": session_id,
         "suspicion_score": round(session.suspicion_score, 1),
         "events": session.events,
         "total_events": len(session.events),
         "violations": list(session.tracker.violations.keys()),
         "last_result": session.last_result,
-    })
+    }))
 
 
 # ── REST: Active proctors ─────────────────────────────────────────────────────
@@ -803,7 +859,7 @@ async def get_proctors(request):
             "flags": (session.last_result or {}).get("flags", []) if session else [],
             "hasReference": bool(session and session.reference_encoding is not None),
         })
-    return web.json_response({"proctors": items})
+    return web.json_response(_json_safe({"proctors": items}))
 
 
 # ── LiveKit proctor start ────────────────────────────────────────────────────
