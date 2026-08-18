@@ -421,6 +421,13 @@ ws.onmessage = (ev) => {
 
 startCam();
 ws.onopen = () => ws.send(JSON.stringify({ type: 'refs_list' }));
+
+// Release the camera if the page is navigated away, reloaded, or hidden —
+// otherwise the stream stays held and reopening /ref reports "device in use".
+function releaseCamera() { stopCam(); }
+window.addEventListener('pagehide', releaseCamera);
+window.addEventListener('beforeunload', releaseCamera);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseCamera(); });
 </script>
 </body>
 </html>
@@ -703,6 +710,17 @@ def make_app(harness):
     async def ws_handler(request):
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
+
+        async def safe_send(obj):
+            """Send a JSON message, tolerating a client that disconnected
+            mid-write (ConnectionResetError / closing transport)."""
+            try:
+                await ws.send_str(json.dumps(obj, default=str))
+            except Exception:
+                # client is gone — mark closed so the outer loop stops cleanly
+                return False
+            return True
+
         harness.clients.add(ws)
         await harness.broadcast({
             "type": "run",
@@ -711,9 +729,9 @@ def make_app(harness):
             "ref": "set" if harness.session.reference_encoding is not None else None,
             "active_ref": harness.active_ref,
         })
-        await ws.send_str(json.dumps({"type": "snapshots", "data": harness.list_snapshots()}))
-        await ws.send_str(json.dumps({"type": "refs", "data": harness.list_references()}))
-        await ws.send_str(json.dumps({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None}))
+        await safe_send({"type": "snapshots", "data": harness.list_snapshots()})
+        await safe_send({"type": "refs", "data": harness.list_references()})
+        await safe_send({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None})
         try:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
@@ -733,29 +751,29 @@ def make_app(harness):
                         payload = data.get("data")
                         jpeg = bytes(payload) if isinstance(payload, list) else None
                         ok, message = await asyncio.to_thread(harness.register_reference_image, jpeg)
-                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
-                        await ws.send_str(json.dumps({"type": "refs", "data": harness.list_references()}))
-                        await ws.send_str(json.dumps({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None}))
+                        await safe_send({"type": "ref", "ok": ok, "message": message})
+                        await safe_send({"type": "refs", "data": harness.list_references()})
+                        await safe_send({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None})
                     elif mtype == "ref_select":
                         ok, message = await asyncio.to_thread(harness.register_reference_file, data.get("name", ""))
-                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
-                        await ws.send_str(json.dumps({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None}))
+                        await safe_send({"type": "ref", "ok": ok, "message": message})
+                        await safe_send({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None})
                     elif mtype == "ref_delete":
                         ok, message = await asyncio.to_thread(harness.delete_reference, data.get("name", ""))
-                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
-                        await ws.send_str(json.dumps({"type": "refs", "data": harness.list_references()}))
-                        await ws.send_str(json.dumps({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None}))
+                        await safe_send({"type": "ref", "ok": ok, "message": message})
+                        await safe_send({"type": "refs", "data": harness.list_references()})
+                        await safe_send({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None})
                     elif mtype == "ref_clear":
                         ok, message = harness.clear_active_reference()
-                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
-                        await ws.send_str(json.dumps({"type": "ref_active", "name": None, "url": None}))
+                        await safe_send({"type": "ref", "ok": ok, "message": message})
+                        await safe_send({"type": "ref_active", "name": None, "url": None})
                     elif mtype == "refs_list":
-                        await ws.send_str(json.dumps({"type": "refs", "data": harness.list_references()}))
+                        await safe_send({"type": "refs", "data": harness.list_references()})
                     elif mtype == "reset":
                         ok, message = harness.reset()
-                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
+                        await safe_send({"type": "ref", "ok": ok, "message": message})
                     elif mtype == "snapshots":
-                        await ws.send_str(json.dumps({"type": "snapshots", "data": harness.list_snapshots()}))
+                        await safe_send({"type": "snapshots", "data": harness.list_snapshots()})
         finally:
             harness.clients.discard(ws)
         return ws
