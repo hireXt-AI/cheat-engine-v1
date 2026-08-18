@@ -178,11 +178,10 @@ class LiveKitProctor:
             f"[PROCTOR] Joined room {self.session_id} "
             f"(identity={self.room.local_participant.identity})"
         )
-        for kind in (rtc.TrackKind.KIND_VIDEO, rtc.TrackKind.KIND_AUDIO):
-            try:
-                await self.room.add_subscription(self.candidate_identity, kind)
-            except Exception as e:
-                print(f"[PROCTOR] add_subscription({kind}) failed: {e}")
+        # No explicit add_subscription needed: livekit SDK >=1.x auto-subscribes
+        # to all remote tracks by default (RoomOptions.auto_subscribe=True), and
+        # `track_subscribed` fires for the candidate's tracks whether they join
+        # before or after the proctor.
 
     def _on_track_subscribed(self, track, publication, participant):
         try:
