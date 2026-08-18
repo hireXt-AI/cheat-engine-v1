@@ -159,6 +159,8 @@ class LiveKitProctor:
         self._processing = False
         self._last_status_time = 0.0
         self._status_min_interval = 0.5
+        self._last_log_time = 0.0
+        self._log_min_interval = 5.0
         self._session = None
 
         # MediaPipe solvers are created once and reused across frames.
@@ -193,6 +195,13 @@ class LiveKitProctor:
                 return
             if track.kind == rtc.TrackKind.KIND_VIDEO:
                 track.add_listener(self._on_candidate_video)
+                print(
+                    f"[PROCTOR] Subscribed to candidate video track "
+                    f"({participant.identity}, sid={publication.sid if publication else '?'}) — "
+                    f"tracking started"
+                )
+            else:
+                print(f"[PROCTOR] Subscribed to candidate audio track (ignored for detection)")
         except Exception as e:
             print(f"[PROCTOR] track_subscribed error: {e}")
 
@@ -233,6 +242,7 @@ class LiveKitProctor:
             session.last_result = result
             sessions[self.session_id] = session
             self._maybe_publish_status(result)
+            self._maybe_log_status(result)
             if trigger:
                 await self._publish_trigger(trigger)
         except Exception as e:
@@ -246,6 +256,19 @@ class LiveKitProctor:
             return
         self._last_status_time = now
         asyncio.create_task(self._publish_status(result))
+
+    def _maybe_log_status(self, result):
+        """Throttled console log so the admin Engine Logs show live tracking."""
+        now = time.time()
+        if now - self._last_log_time < self._log_min_interval:
+            return
+        self._last_log_time = now
+        flags = ", ".join(result.get("flags", [])) or "-"
+        print(
+            f"[TRACK] {self.session_id} | Faces:{result.get('face_count')} | "
+            f"Match:{result.get('face_match')} | Score:{result.get('suspicion_score')} | "
+            f"Flags:[{flags}]"
+        )
 
     async def _publish_status(self, result):
         try:
