@@ -30,7 +30,9 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 import time
+from collections import deque
 from pathlib import Path
 
 import cv2
@@ -710,8 +712,68 @@ async def index(request):
     return web.json_response({"status": "ok", "engine": "cheat-engine-v1"})
 
 
+# ── Engine logs over HTTP ────────────────────────────────────────────────────
+# The Node server runs in Docker and its own PM2 daemon cannot see this host
+# process, so the admin "Engine Logs" page cannot read `pm2 logs`. Instead the
+# engine tees its stdout/stderr into its own log file and serves it here; the
+# Node endpoint fetches it over HTTP (same channel as the working health check).
+LOG_FILE = os.getenv("CHEATING_ENGINE_LOG", os.path.join(os.path.dirname(__file__), "engine.log"))
+
+
+class _Tee:
+    """Duplicates writes to multiple streams (e.g. real stdout + log file)."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data):
+        for s in self.streams:
+            try:
+                s.write(data)
+                s.flush()
+            except Exception:
+                pass
+
+    def flush(self):
+        for s in self.streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+
+def setup_log_file():
+    """Redirect stdout/stderr so all output is also appended to LOG_FILE."""
+    try:
+        log_dir = os.path.dirname(LOG_FILE) or "."
+        os.makedirs(log_dir, exist_ok=True)
+        fh = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
+        sys.stdout = _Tee(sys.__stdout__, fh)
+        sys.stderr = _Tee(sys.__stderr__, fh)
+        print(f"[SERVER] Teeing engine logs to {LOG_FILE}")
+    except Exception as e:
+        print(f"[SERVER] Could not open log file {LOG_FILE}: {e}")
+
+
+async def get_logs(request):
+    """GET /logs?lines=N — tail of this engine's own log file.
+
+    Served over HTTP so the Node admin dashboard can read engine logs without
+    needing access to the host's PM2 daemon."""
+    lines = int(request.query.get("lines", 150))
+    if not os.path.exists(LOG_FILE):
+        return web.json_response({"logs": ""})
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+            tail = deque(f, maxlen=lines)
+        return web.json_response({"logs": "".join(tail)})
+    except Exception as e:
+        return web.json_response({"logs": f"[LOG READ ERROR] {e}"})
+
+
 # ── Routes ───────────────────────────────────────────────────────────────────
 app.router.add_get('/', index)
+app.router.add_get('/logs', get_logs)
 app.router.add_post('/register-face', register_face)
 app.router.add_get('/report/{sessionId}', get_report)
 app.router.add_post('/api/proctor/start', start_proctor)
@@ -753,6 +815,8 @@ def main():
 
     global MATCH_TOLERANCE
     MATCH_TOLERANCE = args.tolerance
+
+    setup_log_file()
 
     import socket as _sock
     s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)

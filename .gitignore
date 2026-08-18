@@ -16,3 +16,6 @@ video_interview/
 # Specific files
 face_dectection1.py
 iris_detector.py
+
+# Engine log served over HTTP for admin dashboard
+engine.log
