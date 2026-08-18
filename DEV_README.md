@@ -54,6 +54,7 @@ Then open **http://localhost:6545** in your browser.
 | `--source` | `0` | Webcam index (`0`), a video file (loops), or an image |
 | `--ref` | — | Reference face image for identity matching |
 | `--fps` | `5` | Detection rate (frames/second) — lower = less CPU |
+| `--threshold` | `3` | Violation occurrences to fire a trigger point (dev default 3 so alerts are quick to see; production uses 12) |
 | `--no-auto` | off | Don't auto-start the feed (use the dashboard button) |
 
 ### Examples
@@ -81,17 +82,31 @@ Then open **http://localhost:6545** in your browser.
 | **Live Detection Feed** | The annotated frame — face box, iris/gaze dots, flags, score overlay (same as production Live Proctoring). |
 | **Status cards** | Suspicion score, faces, face match, eye state, gaze, brightness. |
 | **Flags** | Active detection flags (e.g. `no_blink`, `gaze_away`, `identity_mismatch`). |
-| **Buffered Violations** | Per-violation count out of the 12 needed to trigger a point. |
+| **Buffered Violations** | Per-violation count out of the trigger threshold (dev default 3; production 12). |
 | **System Alerts** | The exact messages the AI receives — trigger points and score-threshold injections. |
+| **Active Reference** | The image currently used as the reference face for identity matching. |
 | **Snapshots** | Evidence thumbnails written to `.evidence/dev_session/` (auto-refresh; click to enlarge). |
 
-### Controls
+### Controls (dashboard)
 
-- **Register current frame as reference** — captures the current frame as the
-  reference face for identity matching (points your camera at yourself, then
-  click). Returns an error if the frame has no/ambiguous face.
+- **Set Reference** — opens the **Reference Capture page** (`/ref`) where you
+  can:
+  - **Capture** a photo from your camera (with **Retake** / **Use as reference**)
+  - **Upload** an image file to test
+  - Pick or **delete** images from the **Reference Gallery** (`references/`
+    folder)
+  - Clear the active reference
 - **Reset session** — clears the violation tracker, score, and threshold state.
 - **Start / Stop** — toggle the detection loop.
+
+> Opening the reference page stops the detection feed first (releasing the
+> webcam) so the capture camera can start without "device already in use".
+
+### Reference images
+
+Captured and uploaded reference images are stored in the repo's **`references/`**
+folder (git-ignored). You can pick any stored image as the active reference for
+identity matching, or delete it.
 
 ---
 
@@ -143,3 +158,7 @@ AI-side alert shown on the dashboard (and printed to the server console):
   matching; the core detection (face/iris/gaze/blink/light) still works.
 - Evidence/trigger snapshots are written under `.evidence/dev_session/`
   (git-ignored).
+- Reference images are stored under `references/` (git-ignored).
+- **"device already in use" when capturing a reference**: the dashboard stops
+  the webcam feed before opening the reference page, so this should not happen.
+  If it does, stop the feed (`Stop`) and reload the reference page.

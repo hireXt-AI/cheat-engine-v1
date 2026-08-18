@@ -52,6 +52,8 @@ from stream_server import (
 )
 
 DEV_SESSION = "dev_session"
+REF_DIR = os.path.join(os.path.dirname(__file__), "references")
+os.makedirs(REF_DIR, exist_ok=True)
 
 # ── Dashboard (embedded single-file HTML) ────────────────────────────────────
 DASHBOARD_HTML = r"""<!DOCTYPE html>
@@ -126,6 +128,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <button id="stopBtn" disabled>Stop</button>
     </div>
     <div id="refStatus" style="font-size:11px;color:#9aa0a6;margin-top:4px"></div>
+    <!-- Active reference display -->
+    <div id="refBox" style="display:none;margin-top:8px;display:none;align-items:center;gap:10px;background:#1d2129;border:1px solid #2a2e37;border-radius:8px;padding:8px 10px">
+      <img id="refImg" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #3a4a5a" alt="active reference"/>
+      <div style="min-width:0">
+        <div style="font-size:10px;color:#9aa0a6;text-transform:uppercase;letter-spacing:.04em">Active Reference</div>
+        <div id="refName" style="font-size:11px;color:#9be69b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+      </div>
+    </div>
     <div class="stats">
       <div class="stat"><div class="k">Suspicion</div><div class="v" id="score">0/100</div></div>
       <div class="stat"><div class="k">Faces</div><div class="v" id="faces">0</div></div>
@@ -152,26 +162,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 </div>
 
 <div id="lightbox" onclick="this.style.display='none'"><img id="lightboxImg" alt=""/></div>
-
-<!-- Reference capture modal -->
-<div id="refModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);align-items:center;justify-content:center;z-index:60">
-  <div class="card" style="width:min(420px,92vw)">
-    <h2>Set Reference Face</h2>
-    <p style="font-size:11px;color:#9aa0a6;margin:0 0 10px">Point your camera at yourself. Capture, review, retake, or submit.</p>
-    <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3">
-      <video id="refVideo" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"></video>
-      <img id="refPreview" style="display:none;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"/>
-    </div>
-    <div id="refError" style="display:none;font-size:11px;color:#ff8a8a;margin-top:8px"></div>
-    <div class="bar" style="margin-top:12px">
-      <button id="refCaptureBtn">Capture</button>
-      <button id="refRetakeBtn" style="display:none">Retake</button>
-      <button id="refSubmitBtn" style="display:none">Use as reference</button>
-      <span style="flex:1"></span>
-      <button id="refCancelBtn">Cancel</button>
-    </div>
-  </div>
-</div>
 
 <script>
 const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -224,57 +214,14 @@ $('startBtn').onclick = () => send({type:'start'});
 $('stopBtn').onclick = () => send({type:'stop'});
 setInterval(() => send({type:'snapshots'}), 5000);
 
-// ── Reference capture modal ─────────────────────────────────────────────
-let refStream = null, refCaptured = null;
-const refModal = $('refModal');
-const refVideo = $('refVideo'), refPreview = $('refPreview');
-const refCaptureBtn = $('refCaptureBtn'), refRetakeBtn = $('refRetakeBtn'),
-      refSubmitBtn = $('refSubmitBtn'), refCancelBtn = $('refCancelBtn'), refError = $('refError');
-
-async function startRefCamera() {
-  try {
-    refStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-    refVideo.srcObject = refStream;
-    refVideo.play();
-  } catch (e) {
-    refError.textContent = 'Camera access required: ' + e.message;
-    refError.style.display = 'block';
-  }
-}
-function stopRefCamera() {
-  if (refStream) { refStream.getTracks().forEach(t => t.stop()); refStream = null; }
-  refVideo.srcObject = null;
-}
-function refResetUI() {
-  refCaptured = null;
-  refPreview.style.display = 'none'; refVideo.style.display = 'block';
-  refCaptureBtn.style.display = 'inline-block'; refRetakeBtn.style.display = 'none'; refSubmitBtn.style.display = 'none';
-  refError.style.display = 'none';
-}
-
-$('openRefBtn').onclick = () => { refModal.style.display = 'flex'; refResetUI(); startRefCamera(); };
-refCancelBtn.onclick = () => { stopRefCamera(); refModal.style.display = 'none'; };
-
-refCaptureBtn.onclick = () => {
-  const canvas = document.createElement('canvas');
-  canvas.width = refVideo.videoWidth || 640; canvas.height = refVideo.videoHeight || 480;
-  canvas.getContext('2d').drawImage(refVideo, 0, 0, canvas.width, canvas.height);
-  refCaptured = canvas.toDataURL('image/jpeg', 0.9);
-  refPreview.src = refCaptured; refPreview.style.display = 'block';
-  refVideo.style.display = 'none';
-  refCaptureBtn.style.display = 'none'; refRetakeBtn.style.display = 'inline-block'; refSubmitBtn.style.display = 'inline-block';
-};
-refRetakeBtn.onclick = () => { refResetUI(); };
-
-refSubmitBtn.onclick = () => {
-  if (!refCaptured) return;
-  // convert dataURL -> blob -> ArrayBuffer -> send to server
-  const bin = atob(refCaptured.split(',')[1]);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  send({ type: 'ref_capture', data: Array.from(bytes) });
-  refSubmitBtn.textContent = 'Registering…';
-  refSubmitBtn.disabled = true;
+// "Set Reference" opens a dedicated capture PAGE. The detection feed holds the
+// webcam, so stop it (releasing the camera) before navigating — otherwise the
+// capture page's getUserMedia hits "device already in use". Clear the feed/logs
+// too so the page starts fresh.
+$('openRefBtn').onclick = () => {
+  send({ type: 'stop' });               // release the webcam from the feed loop
+  send({ type: 'clear' });              // clear logs + score + alerts + snaps
+  location.href = '/ref';
 };
 
 ws.onmessage = (ev) => {
@@ -284,15 +231,23 @@ ws.onmessage = (ev) => {
   else if (msg.type === 'alert') { addAlert(msg.data); }
   else if (msg.type === 'violation') { addAlert({line: msg.line, kind:'violation'}); }
   else if (msg.type === 'snapshots') { renderSnaps(msg.data); }
+  else if (msg.type === 'clear') {
+    $('alerts').innerHTML = '<div class="alert"><span class="t">system</span>Waiting for violations…</div>';
+    $('score').textContent = '0/100'; $('faces').textContent = '0';
+    $('match').textContent = '—'; $('eye').textContent = 'N/A'; $('gaze').textContent = 'N/A';
+    $('bright').textContent = '—'; $('flags').innerHTML = ''; $('buffered').innerHTML = '';
+    $('snaps').innerHTML = ''; $('refStatus').textContent = '';
+  }
   else if (msg.type === 'ref') {
-    if (msg.ok) {
-      stopRefCamera(); refModal.style.display = 'none'; refSubmitBtn.disabled = false; refSubmitBtn.textContent = 'Use as reference';
-      $('refStatus').textContent = '✓ ' + msg.message;
-      $('refStatus').style.color = '#9be69b';
-      addAlert({ line: msg.message, kind: 'ok' });
+    $('refStatus').textContent = '✓ ' + msg.message;
+    $('refStatus').style.color = '#9be69b';
+  }
+  else if (msg.type === 'ref_active') {
+    if (msg.url) {
+      $('refImg').src = msg.url; $('refName').textContent = msg.name;
+      $('refBox').style.display = 'flex';
     } else {
-      refSubmitBtn.disabled = false; refSubmitBtn.textContent = 'Use as reference';
-      refError.textContent = msg.message; refError.style.display = 'block';
+      $('refBox').style.display = 'none';
     }
   }
   else if (msg.type === 'run') {
@@ -307,9 +262,177 @@ ws.onmessage = (ev) => {
 """
 
 
+# ── Reference capture page (standalone) ──────────────────────────────────────
+REF_PAGE_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Cheat Engine v1 — Reference Capture</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background:#0f1115; color:#e6e8ec; }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; border-bottom:1px solid #2a2e37;
+           background:#14171d; position:sticky; top:0; z-index:10; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  .wrap { display:grid; grid-template-columns: 1.2fr 1fr; gap:16px; padding:16px 20px; max-width:1400px; margin:0 auto; }
+  .card { background:#161a21; border:1px solid #2a2e37; border-radius:12px; padding:16px; }
+  .card h2 { font-size:13px; margin:0 0 10px; color:#9aa0a6; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+  .vidwrap { position:relative; background:#000; border-radius:8px; overflow:hidden; aspect-ratio:4/3; }
+  .vidwrap video, .vidwrap img { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  button { background:#1b2733; color:#8ab4f8; border:1px solid #274a68; padding:7px 14px; border-radius:8px;
+           font-size:12px; cursor:pointer; }
+  button:hover { background:#22354a; }
+  button:disabled { opacity:.5; cursor:default; }
+  .err { display:none; font-size:11px; color:#ff8a8a; margin-top:8px; }
+  .msg { font-size:12px; color:#9be69b; margin-top:8px; min-height:16px; }
+  .upl { border:1px dashed #274a68; border-radius:8px; padding:16px; text-align:center; color:#9aa0a6; font-size:12px; cursor:pointer; }
+  .upl:hover { background:#1b2733; }
+  .gallery { display:grid; grid-template-columns: repeat(auto-fill,minmax(110px,1fr)); gap:8px; max-height:420px; overflow-y:auto; }
+  .gitem { position:relative; border-radius:8px; overflow:hidden; border:1px solid #2a2e37; background:#000; }
+  .gitem img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; cursor:pointer; }
+  .gitem .nm { font-size:9px; color:#9aa0a6; padding:2px 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gitem .del { position:absolute; top:4px; right:4px; background:rgba(0,0,0,.75); border:none; color:#ff8a8a;
+                font-size:11px; padding:2px 6px; border-radius:6px; cursor:pointer; }
+  .gitem.active { border-color:#4caf50; }
+  .empty { font-size:12px; color:#9aa0a6; padding:20px; text-align:center; }
+  a.back { color:#8ab4f8; text-decoration:none; font-size:12px; margin-left:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛡️ Reference Capture</h1>
+  <span style="font-size:11px;color:#9aa0a6">capture / upload / pick a reference face for identity matching</span>
+  <a class="back" href="/">← Back to dashboard</a>
+</header>
+
+<div class="wrap">
+  <!-- Left: capture + upload -->
+  <div class="card">
+    <h2>Capture from camera</h2>
+    <div class="vidwrap">
+      <video id="cam" autoplay muted playsinline></video>
+      <img id="preview" style="display:none"/>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="msg" id="msg"></div>
+    <div class="bar">
+      <button id="capBtn">Capture</button>
+      <button id="retakeBtn" style="display:none">Retake</button>
+      <button id="useBtn" style="display:none">Use as reference</button>
+      <span style="flex:1"></span>
+      <button id="clearBtn">Clear active ref</button>
+    </div>
+
+    <h2 style="margin-top:20px">Or upload an image</h2>
+    <label class="upl" for="fileInput">📁 Click to choose an image file to upload as a test reference</label>
+    <input id="fileInput" type="file" accept="image/*" style="display:none"/>
+  </div>
+
+  <!-- Right: gallery of stored references -->
+  <div class="card">
+    <h2>Reference Gallery (references/ folder)</h2>
+    <div class="gallery" id="gallery"><div class="empty">No references yet — capture or upload one.</div></div>
+  </div>
+</div>
+
+<script>
+const ws = new WebSocket(`ws://${location.host}/ws`);
+const $ = id => document.getElementById(id);
+let stream = null, captured = null, activeName = null;
+
+const cam = $('cam'), preview = $('preview');
+const err = $('err'), msg = $('msg');
+
+async function startCam() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    cam.srcObject = stream; cam.style.display = 'block'; preview.style.display = 'none';
+    $('capBtn').style.display = 'inline-block'; $('retakeBtn').style.display = 'none'; $('useBtn').style.display = 'none';
+    err.style.display = 'none';
+  } catch (e) {
+    err.textContent = 'Camera error: ' + e.message + ' — you can still upload an image below.';
+    err.style.display = 'block';
+  }
+}
+function stopCam() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } cam.srcObject = null; }
+
+$('capBtn').onclick = () => {
+  const c = document.createElement('canvas');
+  c.width = cam.videoWidth || 640; c.height = cam.videoHeight || 480;
+  c.getContext('2d').drawImage(cam, 0, 0, c.width, c.height);
+  captured = c.toDataURL('image/jpeg', 0.9);
+  preview.src = captured; preview.style.display = 'block'; cam.style.display = 'none';
+  $('capBtn').style.display = 'none'; $('retakeBtn').style.display = 'inline-block'; $('useBtn').style.display = 'inline-block';
+};
+$('retakeBtn').onclick = () => { captured = null; cam.style.display = 'block'; preview.style.display = 'none';
+  $('capBtn').style.display = 'inline-block'; $('retakeBtn').style.display = 'none'; $('useBtn').style.display = 'none'; };
+
+function sendBytes(bytes) { ws.send(JSON.stringify({ type: 'ref_capture', data: Array.from(bytes) })); }
+$('useBtn').onclick = () => {
+  if (!captured) return;
+  const bin = atob(captured.split(',')[1]); const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  sendBytes(bytes); $('useBtn').textContent = 'Registering…'; $('useBtn').disabled = true;
+};
+
+$('clearBtn').onclick = () => { ws.send(JSON.stringify({ type: 'ref_clear' })); msg.textContent = 'Active reference cleared.'; };
+
+// Upload
+$('fileInput').addEventListener('change', async () => {
+  const f = $('fileInput').files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append('image', f);
+  try {
+    const r = await fetch('/ref/upload', { method: 'POST', body: fd });
+    const j = await r.json();
+    msg.textContent = j.message; msg.style.color = j.ok ? '#9be69b' : '#ff8a8a';
+    ws.send(JSON.stringify({ type: 'refs_list' }));
+  } catch (e) { msg.textContent = 'Upload failed: ' + e.message; msg.style.color = '#ff8a8a'; }
+});
+
+// Gallery
+function renderGallery(refs) {
+  const g = $('gallery');
+  if (!refs.length) { g.innerHTML = '<div class="empty">No references yet.</div>'; return; }
+  g.innerHTML = refs.map(r =>
+    `<div class="gitem ${r.name === activeName ? 'active' : ''}">
+       <img src="${r.url}" onclick="ws.send(JSON.stringify({type:'ref_select',name:'${r.name}'}))" title="Click to use as reference"/>
+       <span class="nm">${r.name}</span>
+       <button class="del" onclick="event.stopPropagation();ws.send(JSON.stringify({type:'ref_delete',name:'${r.name}'}))">✕</button>
+     </div>`
+  ).join('');
+}
+
+ws.onmessage = (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.type === 'refs') renderGallery(m.data);
+  else if (m.type === 'ref') {
+    msg.textContent = m.message; msg.style.color = m.ok ? '#9be69b' : '#ff8a8a';
+    $('useBtn').disabled = false; $('useBtn').textContent = 'Use as reference';
+    if (m.ok) { stopCam(); captured = null; }
+    ws.send(JSON.stringify({ type: 'refs_list' }));
+  }
+  else if (m.type === 'source') { activeName = null; }
+};
+
+startCam();
+ws.onopen = () => ws.send(JSON.stringify({ type: 'refs_list' }));
+</script>
+</body>
+</html>
+"""
+
+
 # ── Detection harness ────────────────────────────────────────────────────────
 class DevHarness:
-    def __init__(self, source, ref_path=None, fps=5, auto=True):
+    def __init__(self, source, ref_path=None, fps=5, auto=True, threshold=None):
+        if threshold is not None:
+            import stream_server as ss
+            ss.TRIGGER_THRESHOLD = threshold
         self.source = source
         self.fps = max(1, fps)
         self.auto = auto
@@ -327,11 +450,22 @@ class DevHarness:
         )
         self._thresholds = {10: False, 30: False, 50: False, 70: False, 90: False}
         self.alert_log = []
+        self.active_ref = None  # filename of the active reference in REF_DIR
 
         if ref_path:
             enc = load_reference_encoding(Path(ref_path))
             if enc is not None:
                 self.session.reference_encoding = enc
+                # copy the --ref image into the references folder so it shows in the gallery
+                try:
+                    img = cv2.imread(str(ref_path))
+                    if img is not None:
+                        fname = f"cli_{int(time.time()*1000)}.jpg"
+                        os.makedirs(REF_DIR, exist_ok=True)
+                        cv2.imwrite(os.path.join(REF_DIR, fname), img)
+                        self.active_ref = fname
+                except Exception:
+                    pass
                 print(f"[DEV] Reference face loaded from {ref_path}")
             else:
                 print(f"[DEV] WARNING: could not load reference from {ref_path}")
@@ -462,42 +596,79 @@ class DevHarness:
             await self.broadcast({"type": "alert", "text": text, "kind": "violation"})
 
     # ── actions ────────────────────────────────────────────────────────────
+    def _save_and_register_reference(self, img, name_hint="ref"):
+        """Save an image into the references folder and, if it has a single
+        clear face, set it as the active reference."""
+        if img is None:
+            return False, "Could not decode image"
+        os.makedirs(REF_DIR, exist_ok=True)
+        fname = f"{name_hint}_{int(time.time()*1000)}.jpg"
+        ref_path = os.path.join(REF_DIR, fname)
+        cv2.imwrite(ref_path, img)
+        enc = load_reference_encoding(Path(ref_path))
+        if enc is None:
+            # keep the file in the gallery but don't activate it
+            return False, f"No/ambiguous face — saved as {fname} but NOT set as reference"
+        self.session.reference_encoding = enc
+        self.active_ref = fname
+        return True, f"Reference registered: {fname} ({len(enc)} dims)"
+
     def register_reference_image(self, jpeg_bytes):
-        """Register a reference face from a JPEG the browser captured via
-        getUserMedia (camera capture modal)."""
+        """Register a reference face from a JPEG the browser captured/uploaded."""
         if not jpeg_bytes:
             return False, "No image data received"
         arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
-            return False, "Could not decode captured image"
-        ref_dir = os.path.join(EVIDENCE_DIR, DEV_SESSION)
-        os.makedirs(ref_dir, exist_ok=True)
-        ref_path = os.path.join(ref_dir, "reference.jpg")
-        cv2.imwrite(ref_path, img)
-        enc = load_reference_encoding(Path(ref_path))
-        if enc is None:
-            return False, "No/ambiguous face in captured reference — retake with a clear face"
-        self.session.reference_encoding = enc
-        return True, f"Reference face registered ({len(enc)} dims)"
+        return self._save_and_register_reference(img, "captured")
 
-    def register_current_frame(self):
-        frame = self.read_frame()
-        if frame is None:
-            return False, "No frame available"
-        ref_dir = os.path.join(EVIDENCE_DIR, DEV_SESSION)
-        os.makedirs(ref_dir, exist_ok=True)
-        ref_path = os.path.join(ref_dir, "reference.jpg")
-        cv2.imwrite(ref_path, frame)
+    def register_reference_file(self, name):
+        """Set an existing file in the references folder as the active reference."""
+        if "/" in name or ".." in name or not name.endswith((".jpg", ".jpeg", ".png")):
+            return False, "Invalid filename"
+        ref_path = os.path.join(REF_DIR, name)
+        if not os.path.exists(ref_path):
+            return False, "Reference file not found"
         enc = load_reference_encoding(Path(ref_path))
         if enc is None:
-            return False, "No/ambiguous face in reference frame — retry with a clear face"
+            return False, f"No/ambiguous face in {name}"
         self.session.reference_encoding = enc
-        return True, f"Reference face registered ({len(enc)} dims)"
+        self.active_ref = name
+        return True, f"Reference set from gallery: {name} ({len(enc)} dims)"
+
+    def clear_active_reference(self):
+        self.session.reference_encoding = None
+        self.active_ref = None
+        return True, "Active reference cleared"
+
+    def list_references(self):
+        if not os.path.isdir(REF_DIR):
+            return []
+        files = sorted(
+            (f for f in os.listdir(REF_DIR)
+             if f.lower().endswith((".jpg", ".jpeg", ".png"))),
+            reverse=True,
+        )
+        return [{"name": f, "url": f"/refimg/{f}"} for f in files]
+
+    def delete_reference(self, name):
+        if "/" in name or ".." in name:
+            return False, "Invalid filename"
+        ref_path = os.path.join(REF_DIR, name)
+        if not os.path.exists(ref_path):
+            return False, "Reference not found"
+        os.remove(ref_path)
+        if name == self.active_ref:
+            self.active_ref = None
+            self.session.reference_encoding = None
+            msg = f"Deleted {name} (was the active reference)"
+        else:
+            msg = f"Deleted {name}"
+        return True, msg
 
     def reset(self):
         self.session = ProctorSession(DEV_SESSION)
         self._thresholds = {10: False, 30: False, 50: False, 70: False, 90: False}
+        self.active_ref = None
         if self.alert_log:
             self.alert_log.clear()
         return True, "Session reset"
@@ -538,8 +709,11 @@ def make_app(harness):
             "running": harness.running,
             "source": str(harness.source),
             "ref": "set" if harness.session.reference_encoding is not None else None,
+            "active_ref": harness.active_ref,
         })
         await ws.send_str(json.dumps({"type": "snapshots", "data": harness.list_snapshots()}))
+        await ws.send_str(json.dumps({"type": "refs", "data": harness.list_references()}))
+        await ws.send_str(json.dumps({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None}))
         try:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
@@ -554,15 +728,29 @@ def make_app(harness):
                     elif mtype == "stop":
                         harness.running = False
                         await harness.broadcast({"type": "run", "running": False})
-                    elif mtype == "register":
-                        ok, message = await asyncio.to_thread(harness.register_current_frame)
-                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
                     elif mtype == "ref_capture":
                         # browser-captured reference image (list of byte ints from data URL)
                         payload = data.get("data")
                         jpeg = bytes(payload) if isinstance(payload, list) else None
                         ok, message = await asyncio.to_thread(harness.register_reference_image, jpeg)
                         await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
+                        await ws.send_str(json.dumps({"type": "refs", "data": harness.list_references()}))
+                        await ws.send_str(json.dumps({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None}))
+                    elif mtype == "ref_select":
+                        ok, message = await asyncio.to_thread(harness.register_reference_file, data.get("name", ""))
+                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
+                        await ws.send_str(json.dumps({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None}))
+                    elif mtype == "ref_delete":
+                        ok, message = await asyncio.to_thread(harness.delete_reference, data.get("name", ""))
+                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
+                        await ws.send_str(json.dumps({"type": "refs", "data": harness.list_references()}))
+                        await ws.send_str(json.dumps({"type": "ref_active", "name": harness.active_ref, "url": f"/refimg/{harness.active_ref}" if harness.active_ref else None}))
+                    elif mtype == "ref_clear":
+                        ok, message = harness.clear_active_reference()
+                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
+                        await ws.send_str(json.dumps({"type": "ref_active", "name": None, "url": None}))
+                    elif mtype == "refs_list":
+                        await ws.send_str(json.dumps({"type": "refs", "data": harness.list_references()}))
                     elif mtype == "reset":
                         ok, message = harness.reset()
                         await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
@@ -584,7 +772,44 @@ def make_app(harness):
     async def status(request):
         return web.json_response({"running": harness.running, "source": str(harness.source)})
 
+    async def ref_page(request):
+        return web.Response(text=REF_PAGE_HTML, content_type="text/html")
+
+    async def ref_image(request):
+        name = request.match_info["name"]
+        if "/" in name or ".." in name:
+            return web.Response(status=400)
+        path = os.path.join(REF_DIR, name)
+        if not os.path.exists(path):
+            return web.Response(status=404)
+        return web.FileResponse(path)
+
+    async def ref_upload(request):
+        """POST /ref/upload — multipart with an 'image' file. Saves it into the
+        references folder and, if it has a clear face, sets it as the reference."""
+        reader = await request.multipart()
+        image_data = None
+        async for part in reader:
+            if part.name == "image":
+                image_data = await part.read()
+        if not image_data:
+            return web.json_response({"ok": False, "message": "No image uploaded"})
+        arr = np.frombuffer(image_data, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        ok, message = await asyncio.to_thread(harness._save_and_register_reference, img, "upload")
+        return web.json_response({"ok": ok, "message": message})
+
+    async def ref_source(request):
+        return web.json_response({
+            "source": str(harness.source),
+            "hasRef": harness.session.reference_encoding is not None,
+        })
+
     app.router.add_get("/", index)
+    app.router.add_get("/ref", ref_page)
+    app.router.add_get("/refimg/{name}", ref_image)
+    app.router.add_post("/ref/upload", ref_upload)
+    app.router.add_get("/ref/source", ref_source)
     app.router.add_get("/ws", ws_handler)
     app.router.add_get("/snapshot/{filename}", snapshot)
     app.router.add_get("/api/status", status)
@@ -597,10 +822,11 @@ def main():
     parser.add_argument("--source", default="0", help="webcam index, video file, or image (default 0)")
     parser.add_argument("--ref", default=None, help="reference face image for identity matching")
     parser.add_argument("--fps", type=int, default=5, help="detection frames/second (default 5)")
+    parser.add_argument("--threshold", type=int, default=3, help="violation occurrences to fire a trigger point (default 3 for dev; production uses 12)")
     parser.add_argument("--no-auto", action="store_true", help="don't auto-start the feed")
     args = parser.parse_args()
 
-    harness = DevHarness(args.source, ref_path=args.ref, fps=args.fps, auto=not args.no_auto)
+    harness = DevHarness(args.source, ref_path=args.ref, fps=args.fps, auto=not args.no_auto, threshold=args.threshold)
     harness.running = harness.auto
 
     if not harness.open_source():

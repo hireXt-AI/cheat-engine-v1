@@ -21,3 +21,6 @@ iris_detector.py
 
 # Engine log served over HTTP for admin dashboard
 engine.log
+
+# Dev harness reference images
+references/
