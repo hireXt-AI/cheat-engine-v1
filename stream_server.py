@@ -382,6 +382,8 @@ class LiveKitProctor:
             self._processing = False
 
     def _maybe_publish_status(self, result):
+        if self._stopped:
+            return
         now = time.time()
         if now - self._last_status_time < self._status_min_interval:
             return
