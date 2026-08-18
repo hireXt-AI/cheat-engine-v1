@@ -161,6 +161,7 @@ class LiveKitProctor:
         self._status_min_interval = 0.5
         self._last_log_time = 0.0
         self._log_min_interval = 5.0
+        self._logged_frame_info = False
         self._session = None
 
         # MediaPipe solvers are created once and reused across frames.
@@ -212,6 +213,15 @@ class LiveKitProctor:
             frame = getattr(event, "frame", None)
             if frame is None:
                 return
+            if self._logged_frame_info is False:
+                try:
+                    print(
+                        f"[PROCTOR] Video frame arriving: {frame.width}x{frame.height} "
+                        f"type={rtc.VideoBufferType.Name(frame.type) if hasattr(rtc.VideoBufferType, 'Name') else frame.type}"
+                    )
+                except Exception:
+                    pass
+                self._logged_frame_info = True
             bgr = self._frame_to_bgr(frame)
             if bgr is None:
                 return
@@ -286,18 +296,24 @@ class LiveKitProctor:
 
     @staticmethod
     def _frame_to_bgr(frame):
-        w, h = frame.width, frame.height
-        data = np.frombuffer(frame.data, dtype=np.uint8)
-        i420_len = w * h * 3 // 2
-        if len(data) == i420_len:
-            yuv = data.reshape((h * 3 // 2, w))
-            return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
-        rgba_len = w * h * 4
-        if len(data) == rgba_len:
-            rgba = data.reshape((h, w, 4))
-            return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
-        bgra = data.reshape((h, w, 4))
-        return cv2.cvtColor(bgra, cv2.COLOR_BGRA2BGR)
+        # Normalize ANY source pixel format (RGBA/BGRA/NV12/I422/... and stride)
+        # to I420 via the SDK's native converter, then cvtColor to BGR. The old
+        # buffer-length heuristics produced black frames on some formats.
+        try:
+            converted = frame.convert(rtc.VideoBufferType.I420)
+        except Exception as e:
+            print(f"[PROCTOR] frame convert to I420 failed: {e}")
+            return None
+        w, h = converted.width, converted.height
+        data = np.frombuffer(converted.data, dtype=np.uint8)
+        if data.size != w * h * 3 // 2:
+            print(
+                f"[PROCTOR] unexpected I420 buffer size {data.size} "
+                f"(expected {w * h * 3 // 2}) for {w}x{h}"
+            )
+            return None
+        yuv = data.reshape((h * 3 // 2, w))
+        return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
 
     async def stop(self):
         try:
