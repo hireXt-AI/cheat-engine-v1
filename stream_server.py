@@ -168,7 +168,7 @@ class LiveKitProctor:
         import mediapipe as mp
         self._mp = mp
         self._face_det = mp.solutions.face_detection.FaceDetection(
-            model_selection=0, min_detection_confidence=0.7
+            model_selection=0, min_detection_confidence=0.5
         )
         self._face_mesh = mp.solutions.face_mesh.FaceMesh(
             refine_landmarks=True, min_detection_confidence=0.5
@@ -213,22 +213,33 @@ class LiveKitProctor:
             await asyncio.sleep(2)
 
     def _ensure_candidate_video_subscription(self):
-        """Explicitly subscribe to the candidate's video track.
+        """Explicitly subscribe to the candidate's video track AND request the
+        HIGHEST simulcast layer.
 
         Auto-subscribe (RoomOptions.auto_subscribe=True) is NOT reliably
         subscribing the candidate's video — only audio arrives. Force the video
-        publication to subscribe via RemoteTrackPublication.set_subscribed()."""
+        publication to subscribe via RemoteTrackPublication.set_subscribed().
+        The SDK then defaults to the LOW layer (e.g. 180x320), which is too low
+        for reliable face detection — request HIGH (full resolution) instead."""
         try:
             candidate = self.room.remote_participants.get(self.candidate_identity)
             if candidate is None:
                 return
             for sid, pub in list(candidate.track_publications.items()):
-                if pub.kind == rtc.TrackKind.KIND_VIDEO and not pub.subscribed:
+                if pub.kind != rtc.TrackKind.KIND_VIDEO:
+                    continue
+                if not pub.subscribed:
                     print(
                         f"[PROCTOR] Explicitly subscribing candidate video {sid} "
                         f"(auto-subscribe missed it)"
                     )
                     pub.set_subscribed(True)
+                # Bump the simulcast layer to full resolution for face detection.
+                if hasattr(pub, "set_video_quality"):
+                    try:
+                        pub.set_video_quality(rtc.VideoQuality.VIDEO_QUALITY_HIGH)
+                    except Exception as e:
+                        print(f"[PROCTOR] set_video_quality(HIGH) failed for {sid}: {e}")
         except Exception as e:
             print(f"[PROCTOR] ensure_candidate_video_subscription error: {e}")
 
