@@ -703,7 +703,15 @@ async def get_live_frame(request):
     return web.Response(body=frame_data, content_type='image/jpeg')
 
 
+# ── Health / index (the Node health dashboard fetches `/` and expects 200) ───
+async def index(request):
+    """GET / — health ping. The Node admin health check marks the engine as
+    Down unless this returns 200."""
+    return web.json_response({"status": "ok", "engine": "cheat-engine-v1"})
+
+
 # ── Routes ───────────────────────────────────────────────────────────────────
+app.router.add_get('/', index)
 app.router.add_post('/register-face', register_face)
 app.router.add_get('/report/{sessionId}', get_report)
 app.router.add_post('/api/proctor/start', start_proctor)
