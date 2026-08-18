@@ -175,6 +175,16 @@ class LiveKitProctor:
         )
 
         self.room.on("track_subscribed", self._on_track_subscribed)
+        self.room.on("track_subscription_failed", self._on_track_subscription_failed)
+
+    def _on_track_subscription_failed(self, participant, track_sid, error):
+        try:
+            print(
+                f"[PROCTOR] SUBSCRIPTION FAILED for {getattr(participant, 'identity', '?')} "
+                f"track_sid={track_sid}: {error}"
+            )
+        except Exception as e:
+            print(f"[PROCTOR] subscription_failed log error: {e}")
 
     async def start(self):
         await self.room.connect(self.livekit_url, self.token)
@@ -186,6 +196,15 @@ class LiveKitProctor:
         # to all remote tracks by default (RoomOptions.auto_subscribe=True), and
         # `track_subscribed` fires for the candidate's tracks whether they join
         # before or after the proctor.
+        # Periodically log what the proctor sees in the room so the admin can
+        # confirm the candidate's video track is visible + subscribed even if no
+        # frames arrive yet.
+        asyncio.create_task(self._room_state_loop())
+
+    async def _room_state_loop(self):
+        while True:
+            await asyncio.sleep(10)
+            self._log_room_state()
 
     def _on_track_subscribed(self, track, publication, participant):
         try:
@@ -279,6 +298,24 @@ class LiveKitProctor:
             f"Match:{result.get('face_match')} | Score:{result.get('suspicion_score')} | "
             f"Flags:[{flags}]"
         )
+
+    def _log_room_state(self):
+        """Log what the proctor sees in the room: every remote participant and
+        their published tracks + subscription state. Lets the admin confirm the
+        candidate's video track is visible/subscribed."""
+        try:
+            for identity, participant in list(self.room.remote_participants.items()):
+                tracks = []
+                for pub in list(participant.track_publications.values()):
+                    tracks.append({
+                        "sid": pub.sid,
+                        "kind": rtc.TrackKind.Name(pub.kind) if hasattr(rtc.TrackKind, "Name") else pub.kind,
+                        "source": pub.source,
+                        "subscribed": pub.subscribed,
+                    })
+                print(f"[PROCTOR] Room: {identity} tracks={tracks}")
+        except Exception as e:
+            print(f"[PROCTOR] room state log error: {e}")
 
     async def _publish_status(self, result):
         try:
