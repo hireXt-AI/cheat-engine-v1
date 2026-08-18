@@ -496,14 +496,17 @@ def process_frame(bgr, session, face_det, face_mesh):
     }
     trigger = None
 
-    def _log(v_type, hr_text, ai_warning, snap_name=None):
+    def _log(v_type, hr_text, ai_warning):
         nonlocal trigger
         reached = session.tracker.log_violation(v_type, formatted_time, hr_text, ai_warning, bgr)
-        if snap_name:
-            snap_path = os.path.join(EVIDENCE_DIR, session.session_id, snap_name)
-            os.makedirs(os.path.dirname(snap_path), exist_ok=True)
-            cv2.imwrite(snap_path, bgr)
-            session.add_event("screenshot", os.path.basename(snap_path))
+        # Snapshot filename carries the actual violation type so the admin
+        # Evidence page shows what was flagged at a glance.
+        clean = v_type.lower().replace(" ", "_").replace(">", "").replace("(", "").replace(")", "").replace("/", "_")
+        snap_name = f"{clean}_{int(now)}.jpg"
+        snap_path = os.path.join(EVIDENCE_DIR, session.session_id, snap_name)
+        os.makedirs(os.path.dirname(snap_path), exist_ok=True)
+        cv2.imwrite(snap_path, bgr)
+        session.add_event("screenshot", os.path.basename(snap_path))
         if reached:
             trigger = {
                 "violation": v_type,
@@ -543,7 +546,6 @@ def process_frame(bgr, session, face_det, face_mesh):
                             "Identity Mismatch",
                             "Unrecognized person in candidate position",
                             "Verification failed, candidate must be present",
-                            f"identity_mismatch_{int(now)}.jpg",
                         )
             except Exception as e:
                 print(f"[PROCTOR] verification skipped: {e}")
@@ -573,7 +575,6 @@ def process_frame(bgr, session, face_det, face_mesh):
             f"Lighting Violation ({lighting_warning.replace('WARN: ', '')})",
             f"Lighting Violation: {lighting_warning}",
             "Please adjust lighting to face the camera in normal light",
-            f"light_violation_{int(now)}.jpg",
         )
 
     # ── People count ─────────────────────────────────────────────────────
@@ -587,7 +588,6 @@ def process_frame(bgr, session, face_det, face_mesh):
                 "Multiple People Detected",
                 f"Multiple people detected ({face_count} people)",
                 "Only candidate is allowed in frame, clear other persons",
-                f"violation_{int(now)}.jpg",
             )
     elif face_count == 0:
         session.identity_ok = None
@@ -611,7 +611,6 @@ def process_frame(bgr, session, face_det, face_mesh):
                     "Missing Candidate",
                     "Candidate missing from frame",
                     "Please stay in front of the camera at all times",
-                    f"missing_candidate_{int(now)}.jpg",
                 )
     else:
         session.face_gone_start = None
@@ -637,7 +636,6 @@ def process_frame(bgr, session, face_det, face_mesh):
                         "Eye Obstruction",
                         "Dark sunglasses or covered eyes detected",
                         "Please remove dark glasses, eyes must be clearly visible",
-                        f"glasses_violation_{int(now)}.jpg",
                     )
 
             ear = calculate_ear(landmarks, width, height)
@@ -658,7 +656,6 @@ def process_frame(bgr, session, face_det, face_mesh):
                             "Eye Closure (>5s)",
                             "Candidate eyes closed continuously for over 5 seconds",
                             "Please keep your eyes open and stay attentive",
-                            f"eye_closed_{int(now)}.jpg",
                         )
             else:
                 session.eye_closed_start_time = None
@@ -674,7 +671,6 @@ def process_frame(bgr, session, face_det, face_mesh):
                         "No Blink (>8s)",
                         "No natural eye blink detected for over 8 seconds",
                         "Please blink naturally to maintain liveliness check",
-                        f"no_blink_{int(now)}.jpg",
                     )
 
             if ear < EAR_CLOSED_THRESHOLD:
@@ -703,7 +699,6 @@ def process_frame(bgr, session, face_det, face_mesh):
                                 iris_dir.title(),
                                 f"Candidate showed repeated eye movement ({iris_dir})",
                                 "Please maintain eye contact with the screen center",
-                                f"gaze_violation_{int(now)}.jpg",
                             )
                 else:
                     session.iris_streak_direction = None
