@@ -198,13 +198,39 @@ class LiveKitProctor:
         # before or after the proctor.
         # Periodically log what the proctor sees in the room so the admin can
         # confirm the candidate's video track is visible + subscribed even if no
-        # frames arrive yet.
+        # frames arrive yet. Also force explicit video subscription: in practice
+        # auto-subscribe only subscribes the candidate's audio, never video.
+        self._last_room_log_time = 0.0
         asyncio.create_task(self._room_state_loop())
 
     async def _room_state_loop(self):
         while True:
-            await asyncio.sleep(10)
-            self._log_room_state()
+            self._ensure_candidate_video_subscription()
+            now = time.time()
+            if now - self._last_room_log_time >= 10:
+                self._last_room_log_time = now
+                self._log_room_state()
+            await asyncio.sleep(2)
+
+    def _ensure_candidate_video_subscription(self):
+        """Explicitly subscribe to the candidate's video track.
+
+        Auto-subscribe (RoomOptions.auto_subscribe=True) is NOT reliably
+        subscribing the candidate's video — only audio arrives. Force the video
+        publication to subscribe via RemoteTrackPublication.set_subscribed()."""
+        try:
+            candidate = self.room.remote_participants.get(self.candidate_identity)
+            if candidate is None:
+                return
+            for sid, pub in list(candidate.track_publications.items()):
+                if pub.kind == rtc.TrackKind.KIND_VIDEO and not pub.subscribed:
+                    print(
+                        f"[PROCTOR] Explicitly subscribing candidate video {sid} "
+                        f"(auto-subscribe missed it)"
+                    )
+                    pub.set_subscribed(True)
+        except Exception as e:
+            print(f"[PROCTOR] ensure_candidate_video_subscription error: {e}")
 
     def _on_track_subscribed(self, track, publication, participant):
         try:
