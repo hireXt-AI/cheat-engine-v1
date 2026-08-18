@@ -12,6 +12,8 @@ video_interview/
 
 # Evidence
 .evidance
+.evidence/
+.evidence
 
 # Specific files
 face_dectection1.py
