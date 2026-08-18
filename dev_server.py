@@ -119,12 +119,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     <h2>Live Detection Feed</h2>
     <img id="feed" alt="live annotated feed"/>
     <div class="bar" style="margin-top:12px">
-      <button id="registerBtn">📸 Register current frame as reference</button>
+      <button id="openRefBtn">📸 Set Reference</button>
       <button id="resetBtn">↺ Reset session</button>
       <span style="flex:1"></span>
       <button id="startBtn" disabled>Start</button>
       <button id="stopBtn" disabled>Stop</button>
     </div>
+    <div id="refStatus" style="font-size:11px;color:#9aa0a6;margin-top:4px"></div>
     <div class="stats">
       <div class="stat"><div class="k">Suspicion</div><div class="v" id="score">0/100</div></div>
       <div class="stat"><div class="k">Faces</div><div class="v" id="faces">0</div></div>
@@ -152,6 +153,26 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
 <div id="lightbox" onclick="this.style.display='none'"><img id="lightboxImg" alt=""/></div>
 
+<!-- Reference capture modal -->
+<div id="refModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);align-items:center;justify-content:center;z-index:60">
+  <div class="card" style="width:min(420px,92vw)">
+    <h2>Set Reference Face</h2>
+    <p style="font-size:11px;color:#9aa0a6;margin:0 0 10px">Point your camera at yourself. Capture, review, retake, or submit.</p>
+    <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3">
+      <video id="refVideo" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"></video>
+      <img id="refPreview" style="display:none;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"/>
+    </div>
+    <div id="refError" style="display:none;font-size:11px;color:#ff8a8a;margin-top:8px"></div>
+    <div class="bar" style="margin-top:12px">
+      <button id="refCaptureBtn">Capture</button>
+      <button id="refRetakeBtn" style="display:none">Retake</button>
+      <button id="refSubmitBtn" style="display:none">Use as reference</button>
+      <span style="flex:1"></span>
+      <button id="refCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const ws = new WebSocket(`ws://${location.host}/ws`);
 const $ = id => document.getElementById(id);
@@ -159,19 +180,6 @@ let status = {};
 
 ws.onopen = () => { $('connBadge').textContent = 'connected'; $('connBadge').style.color = '#9be69b'; };
 ws.onclose = () => { $('connBadge').textContent = 'disconnected'; $('connBadge').style.color = '#ff8a8a'; };
-ws.onmessage = (ev) => {
-  const msg = JSON.parse(ev.data);
-  if (msg.type === 'frame') { $('feed').src = 'data:image/jpeg;base64,' + msg.data; }
-  else if (msg.type === 'status') { renderStatus(msg.data); }
-  else if (msg.type === 'alert') { addAlert(msg.data); }
-  else if (msg.type === 'violation') { addAlert({line: msg.line, kind:'violation'}); }
-  else if (msg.type === 'snapshots') { renderSnaps(msg.data); }
-  else if (msg.type === 'ref') { addAlert({line: msg.message, kind: msg.ok ? 'ok' : 'err'}); }
-  else if (msg.type === 'run') {
-    $('startBtn').disabled = !msg.running; $('stopBtn').disabled = msg.running;
-    if (msg.source) $('srcLabel').textContent = 'source: ' + msg.source;
-  }
-};
 
 function renderStatus(s) {
   status = s;
@@ -211,11 +219,88 @@ function renderSnaps(list) {
 function view(url) { $('lightboxImg').src = url; $('lightbox').style.display = 'flex'; }
 
 function send(m) { if (ws.readyState === 1) ws.send(JSON.stringify(m)); }
-$('registerBtn').onclick = () => send({type:'register'});
 $('resetBtn').onclick = () => send({type:'reset'});
 $('startBtn').onclick = () => send({type:'start'});
 $('stopBtn').onclick = () => send({type:'stop'});
 setInterval(() => send({type:'snapshots'}), 5000);
+
+// ── Reference capture modal ─────────────────────────────────────────────
+let refStream = null, refCaptured = null;
+const refModal = $('refModal');
+const refVideo = $('refVideo'), refPreview = $('refPreview');
+const refCaptureBtn = $('refCaptureBtn'), refRetakeBtn = $('refRetakeBtn'),
+      refSubmitBtn = $('refSubmitBtn'), refCancelBtn = $('refCancelBtn'), refError = $('refError');
+
+async function startRefCamera() {
+  try {
+    refStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    refVideo.srcObject = refStream;
+    refVideo.play();
+  } catch (e) {
+    refError.textContent = 'Camera access required: ' + e.message;
+    refError.style.display = 'block';
+  }
+}
+function stopRefCamera() {
+  if (refStream) { refStream.getTracks().forEach(t => t.stop()); refStream = null; }
+  refVideo.srcObject = null;
+}
+function refResetUI() {
+  refCaptured = null;
+  refPreview.style.display = 'none'; refVideo.style.display = 'block';
+  refCaptureBtn.style.display = 'inline-block'; refRetakeBtn.style.display = 'none'; refSubmitBtn.style.display = 'none';
+  refError.style.display = 'none';
+}
+
+$('openRefBtn').onclick = () => { refModal.style.display = 'flex'; refResetUI(); startRefCamera(); };
+refCancelBtn.onclick = () => { stopRefCamera(); refModal.style.display = 'none'; };
+
+refCaptureBtn.onclick = () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = refVideo.videoWidth || 640; canvas.height = refVideo.videoHeight || 480;
+  canvas.getContext('2d').drawImage(refVideo, 0, 0, canvas.width, canvas.height);
+  refCaptured = canvas.toDataURL('image/jpeg', 0.9);
+  refPreview.src = refCaptured; refPreview.style.display = 'block';
+  refVideo.style.display = 'none';
+  refCaptureBtn.style.display = 'none'; refRetakeBtn.style.display = 'inline-block'; refSubmitBtn.style.display = 'inline-block';
+};
+refRetakeBtn.onclick = () => { refResetUI(); };
+
+refSubmitBtn.onclick = () => {
+  if (!refCaptured) return;
+  // convert dataURL -> blob -> ArrayBuffer -> send to server
+  const bin = atob(refCaptured.split(',')[1]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  send({ type: 'ref_capture', data: Array.from(bytes) });
+  refSubmitBtn.textContent = 'Registering…';
+  refSubmitBtn.disabled = true;
+};
+
+ws.onmessage = (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (msg.type === 'frame') { $('feed').src = 'data:image/jpeg;base64,' + msg.data; }
+  else if (msg.type === 'status') { renderStatus(msg.data); }
+  else if (msg.type === 'alert') { addAlert(msg.data); }
+  else if (msg.type === 'violation') { addAlert({line: msg.line, kind:'violation'}); }
+  else if (msg.type === 'snapshots') { renderSnaps(msg.data); }
+  else if (msg.type === 'ref') {
+    if (msg.ok) {
+      stopRefCamera(); refModal.style.display = 'none'; refSubmitBtn.disabled = false; refSubmitBtn.textContent = 'Use as reference';
+      $('refStatus').textContent = '✓ ' + msg.message;
+      $('refStatus').style.color = '#9be69b';
+      addAlert({ line: msg.message, kind: 'ok' });
+    } else {
+      refSubmitBtn.disabled = false; refSubmitBtn.textContent = 'Use as reference';
+      refError.textContent = msg.message; refError.style.display = 'block';
+    }
+  }
+  else if (msg.type === 'run') {
+    $('startBtn').disabled = !msg.running; $('stopBtn').disabled = msg.running;
+    if (msg.source) $('srcLabel').textContent = 'source: ' + msg.source;
+    if (msg.ref) { $('refStatus').textContent = 'Reference: ' + msg.ref; $('refStatus').style.color = '#9be69b'; }
+  }
+};
 </script>
 </body>
 </html>
@@ -377,6 +462,25 @@ class DevHarness:
             await self.broadcast({"type": "alert", "text": text, "kind": "violation"})
 
     # ── actions ────────────────────────────────────────────────────────────
+    def register_reference_image(self, jpeg_bytes):
+        """Register a reference face from a JPEG the browser captured via
+        getUserMedia (camera capture modal)."""
+        if not jpeg_bytes:
+            return False, "No image data received"
+        arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return False, "Could not decode captured image"
+        ref_dir = os.path.join(EVIDENCE_DIR, DEV_SESSION)
+        os.makedirs(ref_dir, exist_ok=True)
+        ref_path = os.path.join(ref_dir, "reference.jpg")
+        cv2.imwrite(ref_path, img)
+        enc = load_reference_encoding(Path(ref_path))
+        if enc is None:
+            return False, "No/ambiguous face in captured reference — retake with a clear face"
+        self.session.reference_encoding = enc
+        return True, f"Reference face registered ({len(enc)} dims)"
+
     def register_current_frame(self):
         frame = self.read_frame()
         if frame is None:
@@ -429,7 +533,12 @@ def make_app(harness):
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         harness.clients.add(ws)
-        await harness.broadcast({"type": "run", "running": harness.running, "source": str(harness.source)})
+        await harness.broadcast({
+            "type": "run",
+            "running": harness.running,
+            "source": str(harness.source),
+            "ref": "set" if harness.session.reference_encoding is not None else None,
+        })
         await ws.send_str(json.dumps({"type": "snapshots", "data": harness.list_snapshots()}))
         try:
             async for msg in ws:
@@ -447,6 +556,12 @@ def make_app(harness):
                         await harness.broadcast({"type": "run", "running": False})
                     elif mtype == "register":
                         ok, message = await asyncio.to_thread(harness.register_current_frame)
+                        await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
+                    elif mtype == "ref_capture":
+                        # browser-captured reference image (list of byte ints from data URL)
+                        payload = data.get("data")
+                        jpeg = bytes(payload) if isinstance(payload, list) else None
+                        ok, message = await asyncio.to_thread(harness.register_reference_image, jpeg)
                         await ws.send_str(json.dumps({"type": "ref", "ok": ok, "message": message}))
                     elif mtype == "reset":
                         ok, message = harness.reset()
