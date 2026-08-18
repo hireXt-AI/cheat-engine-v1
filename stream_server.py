@@ -137,6 +137,7 @@ class ProctorSession:
         self.face_gone_start = None
         self.gaze_away_start = None
         self.last_screenshot = 0.0
+        self.last_result = None  # latest detection result (for live admin view)
 
     # ── Event + score helpers (mirror v0) ─────────────────────────────────
     def add_event(self, event_type, detail=""):
@@ -217,17 +218,19 @@ class LiveKitProctor:
             if session is None:
                 return
 
-            ok, enc = cv2.imencode('.jpg', bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
-            if not ok:
-                return
-            jpeg = enc.tobytes()
-            latest_frames[self.session_id] = jpeg
-
             result, trigger = await asyncio.to_thread(
                 process_frame, bgr, session, self._face_det, self._face_mesh
             )
             if result is None:
                 return
+
+            # process_frame annotates bgr in place — store the ANNOTATED frame
+            # so /live-frame shows the candidate being traced with boxes.
+            ok, enc = cv2.imencode('.jpg', bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            if ok:
+                latest_frames[self.session_id] = enc.tobytes()
+
+            session.last_result = result
             sessions[self.session_id] = session
             self._maybe_publish_status(result)
             if trigger:
@@ -533,7 +536,54 @@ def process_frame(bgr, session, face_det, face_mesh):
 
     session.suspicion_score = min(session.suspicion_score, 100)
     result["suspicion_score"] = round(session.suspicion_score, 1)
+
+    annotate_frame(bgr, results, width, height, face_count, result, session, now)
     return result, trigger
+
+
+def annotate_frame(frame, results, width, height, face_count, result, session, now):
+    """Draw detection overlays directly onto the BGR frame (in place).
+
+    The annotated frame is what the admin dashboard sees via /live-frame, so the
+    live view shows the candidate being traced with boxes + status text."""
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    cv2.putText(frame, f"SID: {session.session_id}", (10, height - 30), font, 0.5, (0, 255, 255), 1)
+    cv2.putText(frame, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), (10, height - 10), font, 0.5, (0, 255, 255), 1)
+    cv2.putText(frame, f"Score: {result['suspicion_score']}  Engine: v1", (10, 30), font, 0.7, (0, 255, 255), 2)
+
+    if face_count == 0:
+        cv2.putText(frame, "WARNING: NO CANDIDATE", (20, 65), font, 1.0, (0, 165, 255), 3)
+        cv2.rectangle(frame, (0, 0), (width - 1, height - 1), (0, 165, 255), 3)
+    elif face_count > 1:
+        cv2.putText(frame, f"WARNING: {face_count} PEOPLE!", (20, 65), font, 1.0, (0, 0, 255), 3)
+        cv2.rectangle(frame, (0, 0), (width - 1, height - 1), (0, 0, 255), 4)
+
+    if results.detections:
+        for i, det in enumerate(results.detections):
+            b = det.location_data.relative_bounding_box
+            bx, by = int(b.xmin * width), int(b.ymin * height)
+            bw, bh = int(b.width * width), int(b.height * height)
+            if i == 0 and result.get("face_match") is True:
+                color, label = (0, 255, 0), "Candidate (match)"
+            elif i == 0 and result.get("face_match") is False:
+                color, label = (0, 0, 255), "UNKNOWN PERSON"
+            else:
+                color, label = (0, 255, 255), "Unknown"
+            cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), color, 2)
+            cv2.putText(frame, label, (bx, max(20, by - 10)), font, 0.6, color, 2)
+
+    for ex, ey, ew, eh in result.get("eye_boxes", []):
+        cx = int((ex + ew / 2.0) * width)
+        cy = int((ey + eh / 2.0) * height)
+        cv2.circle(frame, (cx, cy), 3, (0, 255, 255), -1)
+
+    if result.get("eye_state") and result["eye_state"] != "N/A":
+        cv2.putText(frame, f"Eye: {result['eye_state']}  Gaze: {result.get('gaze')}", (20, height - 60), font, 0.55, (0, 255, 255), 2)
+
+    if result.get("flags"):
+        flags_str = ", ".join(result["flags"])
+        cv2.putText(frame, "FLAGS: " + flags_str, (20, height - 85), font, 0.55, (0, 0, 255), 2)
 
 
 # face_recognition wrapped for clarity + JSON-safe (kept thin so failures fail soft)
@@ -615,7 +665,26 @@ async def get_report(request):
         "events": session.events,
         "total_events": len(session.events),
         "violations": list(session.tracker.violations.keys()),
+        "last_result": session.last_result,
     })
+
+
+# ── REST: Active proctors ─────────────────────────────────────────────────────
+async def get_proctors(request):
+    """GET /proctors — list active proctor sessions for the live admin view."""
+    items = []
+    for session_id, proctor in list(proctors.items()):
+        session = sessions.get(session_id)
+        items.append({
+            "sessionId": session_id,
+            "candidateIdentity": proctor.candidate_identity,
+            "joined": True,
+            "suspicion_score": round(session.suspicion_score, 1) if session else 0,
+            "face_count": (session.last_result or {}).get("face_count", 0) if session else 0,
+            "flags": (session.last_result or {}).get("flags", []) if session else [],
+            "hasReference": bool(session and session.reference_encoding is not None),
+        })
+    return web.json_response({"proctors": items})
 
 
 # ── LiveKit proctor start ────────────────────────────────────────────────────
@@ -775,6 +844,7 @@ app.router.add_get('/', index)
 app.router.add_get('/logs', get_logs)
 app.router.add_post('/register-face', register_face)
 app.router.add_get('/report/{sessionId}', get_report)
+app.router.add_get('/proctors', get_proctors)
 app.router.add_post('/api/proctor/start', start_proctor)
 app.router.add_get('/evidence', list_evidence_sessions)
 app.router.add_get('/evidence/{sessionId}/{filename}', get_evidence_image)
