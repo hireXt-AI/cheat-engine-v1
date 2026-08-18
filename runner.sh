@@ -29,11 +29,12 @@ pip install -q -r requirements.txt
 # Run with PM2
 PORT="${CHEATING_ENGINE_PORT:-6544}"
 
-if pm2 describe cheating-engine > /dev/null 2>&1; then
-  pm2 restart cheating-engine --update-env
-else
-  pm2 start .venv/bin/python --name "cheating-engine" -- stream_server.py --port "$PORT"
-  pm2 save
-fi
+# Always start fresh. `pm2 restart` keeps the ORIGINAL script path, so if an
+# older engine (e.g. v0) is already registered under the name "cheating-engine",
+# a restart would keep running that old code forever. Deleting first guarantees
+# THIS engine's venv + stream_server.py is what actually runs.
+pm2 delete cheating-engine > /dev/null 2>&1 || true
+pm2 start .venv/bin/python --name "cheating-engine" -- stream_server.py --port "$PORT"
+pm2 save
 
 echo "=== Cheating engine running on port $PORT ==="
