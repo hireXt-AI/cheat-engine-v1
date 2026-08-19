@@ -26,6 +26,11 @@ Usage:
     python stream_server.py [--port 6544] [--tolerance 0.6]
 """
 
+
+
+
+
+import wave
 import argparse
 import asyncio
 import json
@@ -34,9 +39,14 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
-
+from s3_storage import upload_evidence
 import cv2
 import numpy as np
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from s3_storage import upload_evidence
 
 # LiveKit is optional: keep REST/register-face/report working even if the
 # `livekit` package is not installed yet.
@@ -57,6 +67,7 @@ from main import (
     detect_black_glasses,
     detect_iris_direction,
     load_reference_encoding,
+    combine_audio_video,
     MIN_BRIGHTNESS_PCT,
     MAX_BRIGHTNESS_PCT,
 )
@@ -92,6 +103,9 @@ EVIDENCE_DIR = os.path.join(os.path.dirname(__file__), '.evidence')
 TRIGGER_DIR = os.path.join(EVIDENCE_DIR, 'trigger_points')
 os.makedirs(EVIDENCE_DIR, exist_ok=True)
 os.makedirs(TRIGGER_DIR, exist_ok=True)
+RECORDING_DIR = os.path.join(EVIDENCE_DIR, 'recordings')
+os.makedirs(RECORDING_DIR, exist_ok=True)
+RECORDING_FPS = 20.0
 
 MATCH_TOLERANCE = 0.6  # face_recognition face_distance tolerance (lower = stricter)
 
@@ -104,13 +118,18 @@ sessions = {}  # sessionId -> detection state (mirrors v0's session dict)
 
 # ── v1 detection config (mirrors main.start_interview_recording) ─────────────
 EAR_CLOSED_THRESHOLD = 0.18
-NO_BLINK_WARN_SECONDS = 8.0
+NO_BLINK_WARN_SECONDS = 60.0
 REQUIRED_GLASSES_FRAMES = 3
 EYE_OPEN_FOR_GAZE_EAR = 0.23
 IRIS_STREAK_TRIGGER = 6
-TRIGGER_THRESHOLD = 12          # occurrences per violation type -> trigger point
-VERIFY_EVERY_SECONDS = 2.0      # face_recognition identity check cadence
-SNAPSHOT_COOLDOWN_S = 3.0       # min seconds between standard evidence snapshots
+TRIGGER_THRESHOLD = 3          # occurrences per violation type -> trigger point
+VERIFY_EVERY_SECONDS = 30.0      # face_recognition identity check cadence
+SNAPSHOT_COOLDOWN_S = 10.0       # min seconds between standard evidence snapshots
+
+# Head-pose thresholds (mirrors main.py's start_interview_recording loop)
+HEAD_YAW_THRESHOLD = 0.20
+HEAD_PITCH_UP_THRESHOLD = 0.26
+HEAD_PITCH_DOWN_THRESHOLD = 0.72
 
 
 class ProctorSession:
@@ -128,6 +147,16 @@ class ProctorSession:
             user_id=f"USER_{session_id}",
             threshold=TRIGGER_THRESHOLD,
         )
+
+        # ── Recording (raw video + audio → combined compressed mp4) ───────
+        rec_dir = Path(RECORDING_DIR) / session_id
+        rec_dir.mkdir(parents=True, exist_ok=True)
+        self.raw_video_path = rec_dir / f"{session_id}_raw.mp4"
+        self.audio_path = rec_dir / f"{session_id}.wav"
+        self.final_video_path = rec_dir / f"{session_id}.mp4"
+        self.video_writer = None      # lazily created (frame size not known yet)
+        self._wav_file = None         # lazily created (sample rate not known yet)
+        self.recording_finalized = False
 
         # Cooldown timers (seconds)
         self.last_verify_time = 0.0
@@ -165,6 +194,37 @@ class ProctorSession:
 
     def bump_score(self, delta):
         self.suspicion_score = min(self.suspicion_score + delta, 100)
+
+    def write_video_frame(self, bgr, fps=RECORDING_FPS):
+        if self.video_writer is None:
+            h, w = bgr.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            self.video_writer = cv2.VideoWriter(str(self.raw_video_path), fourcc, fps, (w, h))
+        self.video_writer.write(bgr)
+
+    def write_audio_frame(self, pcm_bytes, sample_rate, channels, sample_width=2):
+        if self._wav_file is None:
+            self._wav_file = wave.open(str(self.audio_path), 'wb')
+            self._wav_file.setnchannels(channels)
+            self._wav_file.setsampwidth(sample_width)
+            self._wav_file.setframerate(sample_rate)
+        self._wav_file.writeframes(pcm_bytes)
+
+    def finalize_recording(self, actual_fps=RECORDING_FPS):
+        """Close writers, then mux + compress raw video/audio into one MP4
+        via main.py's combine_audio_video (H.264 CRF28 veryfast + AAC 96k),
+        which also deletes the temporary raw video and WAV files."""
+        if self.recording_finalized:
+            return
+        self.recording_finalized = True
+        if self.video_writer is not None:
+            self.video_writer.release()
+            self.video_writer = None
+        if self._wav_file is not None:
+            self._wav_file.close()
+            self._wav_file = None
+        if self.raw_video_path.exists():
+            combine_audio_video(self.raw_video_path, self.audio_path, self.final_video_path, actual_fps)
 
 
 class LiveKitProctor:
@@ -226,6 +286,9 @@ class LiveKitProctor:
                 self._face_mesh.close()
             except Exception:
                 pass
+            session = self._session
+            if session is not None:
+                await asyncio.to_thread(session.finalize_recording)
             try:
                 await self.room.disconnect()
             except Exception:
@@ -283,6 +346,12 @@ class LiveKitProctor:
             if candidate is None:
                 return
             for sid, pub in list(candidate.track_publications.items()):
+                if pub.kind == rtc.TrackKind.KIND_AUDIO:
+                    if not pub.subscribed:
+                        print(f"[PROCTOR] Explicitly subscribing AUDIO {sid}")
+                        pub.set_subscribed(True)
+                    continue
+
                 if pub.kind != rtc.TrackKind.KIND_VIDEO:
                     continue
                 if not pub.subscribed:
@@ -314,8 +383,9 @@ class LiveKitProctor:
                     f"tracking started"
                 )
                 asyncio.create_task(self._consume_video(track))
-            else:
-                print(f"[PROCTOR] Subscribed to candidate audio track (ignored for detection)")
+            elif track.kind == rtc.TrackKind.KIND_AUDIO:
+                print(f"[PROCTOR] Subscribed to candidate audio track — recording started")
+                asyncio.create_task(self._consume_audio(track))
         except Exception as e:
             print(f"[PROCTOR] track_subscribed error: {e}")
 
@@ -352,6 +422,32 @@ class LiveKitProctor:
         except Exception as e:
             print(f"[PROCTOR] video stream ended/error: {e}")
 
+    async def _consume_audio(self, track):
+        """Consume the candidate's audio track and write raw PCM into the
+        session's WAV file (muxed with video later in finalize_recording)."""
+        try:
+            stream = rtc.AudioStream(track)
+            async for event in stream:
+                if self._stopped:
+                    break
+                frame = getattr(event, "frame", None)
+                if frame is None:
+                    continue
+                session = self._session
+                if session is None:
+                    continue
+                try:
+                    pcm_bytes = bytes(frame.data)
+                    session.write_audio_frame(
+                        pcm_bytes,
+                        sample_rate=frame.sample_rate,
+                        channels=frame.num_channels,
+                    )
+                except Exception as e:
+                    print(f"[PROCTOR] audio write error: {e}")
+        except Exception as e:
+            print(f"[PROCTOR] audio stream ended/error: {e}")
+
     async def _process_video(self, bgr):
         try:
             session = self._session
@@ -371,6 +467,7 @@ class LiveKitProctor:
                 latest_frames[self.session_id] = enc.tobytes()
 
             session.last_result = result
+            session.write_video_frame(bgr)
             sessions[self.session_id] = session
             self._maybe_publish_status(result)
             self._maybe_log_status(result)
@@ -487,6 +584,7 @@ def process_frame(bgr, session, face_det, face_mesh):
         "eye_state": "N/A",
         "gaze": "N/A",
         "sunglasses": False,
+        "head_pose": None,
         "face_box": None,
         "eye_boxes": [],
         "gaze_away_duration": 0,
@@ -500,15 +598,69 @@ def process_frame(bgr, session, face_det, face_mesh):
 
     def _log(v_type, hr_text, ai_warning):
         nonlocal trigger
-        reached = session.tracker.log_violation(v_type, formatted_time, hr_text, ai_warning, bgr)
+
+        ai_warning = f"[system_alert_cheating_engine] - {ai_warning}"
+
+        reached = session.tracker.log_violation(
+            v_type,
+            formatted_time,
+            hr_text,
+            ai_warning,
+            bgr
+        )
+
         # Snapshot filename carries the actual violation type so the admin
         # Evidence page shows what was flagged at a glance.
         clean = v_type.lower().replace(" ", "_").replace(">", "").replace("(", "").replace(")", "").replace("/", "_")
+        clean = (
+            v_type.lower()
+            .replace(" ", "_")
+            .replace(">", "")
+            .replace("(", "")
+            .replace(")", "")
+            .replace("/", "_")
+        )
+
         snap_name = f"{clean}_{int(now)}.jpg"
-        snap_path = os.path.join(EVIDENCE_DIR, session.session_id, snap_name)
+        snap_path = os.path.join(
+            EVIDENCE_DIR,
+            session.session_id,
+            snap_name
+        )
+
         os.makedirs(os.path.dirname(snap_path), exist_ok=True)
-        cv2.imwrite(snap_path, bgr)
-        session.add_event("screenshot", os.path.basename(snap_path))
+
+        # Save evidence locally
+        saved = cv2.imwrite(snap_path, bgr)
+
+        if saved:
+            session.add_event(
+                "screenshot",
+                os.path.basename(snap_path)
+            )
+
+            print(f"[EVIDENCE] Saved locally: {snap_path}")
+
+            # Upload evidence to S3
+            try:
+                s3_key = upload_evidence(
+                    snap_path,
+                    session.session_id
+                )
+
+                print(f"[S3] Evidence uploaded: {s3_key}")
+
+                session.add_event(
+                    "s3_evidence",
+                    s3_key
+                )
+
+            except Exception as e:
+                # S3 failure should not stop detection
+                print(f"[S3] Upload failed: {e}")
+
+        else:
+            print(f"[EVIDENCE] Failed to save snapshot: {snap_path}")
         if reached:
             trigger = {
                 "violation": v_type,
@@ -517,7 +669,6 @@ def process_frame(bgr, session, face_det, face_mesh):
                 "timestamp": formatted_time,
                 "suspicion_score": round(session.suspicion_score, 1),
             }
-
     face_box = None
     if face_count > 0:
         det = results.detections[0]
@@ -547,7 +698,7 @@ def process_frame(bgr, session, face_det, face_mesh):
                         _log(
                             "Identity Mismatch",
                             "Unrecognized person in candidate position",
-                            "Verification failed, candidate must be present",
+                            "Identity mismatch detected",
                         )
             except Exception as e:
                 print(f"[PROCTOR] verification skipped: {e}")
@@ -576,7 +727,7 @@ def process_frame(bgr, session, face_det, face_mesh):
         _log(
             f"Lighting Violation ({lighting_warning.replace('WARN: ', '')})",
             f"Lighting Violation: {lighting_warning}",
-            "Please adjust lighting to face the camera in normal light",
+            "Poor lighting detected",
         )
 
     # ── People count ─────────────────────────────────────────────────────
@@ -584,12 +735,12 @@ def process_frame(bgr, session, face_det, face_mesh):
         result["flags"].append("multiple_faces")
         session.bump_score(5)
         session.add_event("multi_face", f"{face_count} faces detected")
-        if now - session.last_snap_time > 3.0:
+        if now - session.last_snap_time > 0.0:
             session.last_snap_time = now
             _log(
                 "Multiple People Detected",
                 f"Multiple people detected ({face_count} people)",
-                "Only candidate is allowed in frame, clear other persons",
+                 "Multiple people detected",
             )
     elif face_count == 0:
         session.identity_ok = None
@@ -607,15 +758,59 @@ def process_frame(bgr, session, face_det, face_mesh):
             result["flags"].append("face_gone_long")
             session.bump_score(2)
             session.add_event("face_gone", f"{gone_dur:.1f}s")
-            if now - session.last_missing_face_snap_time > 3.0:
+            if now - session.last_missing_face_snap_time > 0.0:
                 session.last_missing_face_snap_time = now
                 _log(
                     "Missing Candidate",
                     "Candidate missing from frame",
-                    "Please stay in front of the camera at all times",
+                    "Candidate missing from frame",
                 )
     else:
         session.face_gone_start = None
+
+        # ── Head Movement / Head Pose Detection (ported from main.py) ────
+        # Uses the same MediaPipe FaceDetection relative_keypoints (no
+        # dependency on face_mesh), so this runs even if FaceMesh below
+        # fails to find landmarks on a given frame.
+        det0 = results.detections[0]
+        keypoints = det0.location_data.relative_keypoints
+        rx, ry = int(keypoints[0].x * width), int(keypoints[0].y * height)
+        lx, ly = int(keypoints[1].x * width), int(keypoints[1].y * height)
+        nx, ny = int(keypoints[2].x * width), int(keypoints[2].y * height)
+        mx, my = int(keypoints[3].x * width), int(keypoints[3].y * height)
+
+        eye_center_x = (rx + lx) / 2.0
+        eye_dist = abs(lx - rx)
+        yaw_ratio = (nx - eye_center_x) / eye_dist if eye_dist > 0 else 0
+
+        eye_center_y = (ry + ly) / 2.0
+        face_length = my - eye_center_y
+        pitch_ratio = (ny - eye_center_y) / face_length if face_length > 0 else 0.5
+
+        movement_state = None
+        if yaw_ratio < -HEAD_YAW_THRESHOLD:
+            movement_state = "LOOKING RIGHT"
+        elif yaw_ratio > HEAD_YAW_THRESHOLD:
+            movement_state = "LOOKING LEFT"
+        elif pitch_ratio < HEAD_PITCH_UP_THRESHOLD:
+            movement_state = "LOOKING UP"
+        elif pitch_ratio > HEAD_PITCH_DOWN_THRESHOLD:
+            movement_state = "LOOKING DOWN"
+
+        result["head_pose"] = movement_state
+
+        if movement_state:
+            result["flags"].append("head_movement")
+            session.bump_score(2)
+            session.add_event("head_movement", movement_state)
+            if now - session.last_movement_snap_time > 3.0:
+                session.last_movement_snap_time = now
+                short_dir = movement_state.replace("LOOKING ", "").lower()
+                _log(
+                    movement_state.title(),
+                    f"Head turned {short_dir}",
+                    f"Candidate looking {short_dir}",
+                )
 
         # ── FaceMesh: glasses, EAR, blink, iris ─────────────────────────
         mesh_results = face_mesh.process(rgb_frame)
@@ -637,7 +832,7 @@ def process_frame(bgr, session, face_det, face_mesh):
                     _log(
                         "Eye Obstruction",
                         "Dark sunglasses or covered eyes detected",
-                        "Please remove dark glasses, eyes must be clearly visible",
+                        "Eye obstruction detected",
                     )
 
             ear = calculate_ear(landmarks, width, height)
@@ -657,7 +852,7 @@ def process_frame(bgr, session, face_det, face_mesh):
                         _log(
                             "Eye Closure (>5s)",
                             "Candidate eyes closed continuously for over 5 seconds",
-                            "Please keep your eyes open and stay attentive",
+                            "Eyes closed for extended duration",
                         )
             else:
                 session.eye_closed_start_time = None
@@ -670,9 +865,9 @@ def process_frame(bgr, session, face_det, face_mesh):
                 if now - session.last_no_blink_snap_time > 3.0:
                     session.last_no_blink_snap_time = now
                     _log(
-                        "No Blink (>8s)",
-                        "No natural eye blink detected for over 8 seconds",
-                        "Please blink naturally to maintain liveliness check",
+                        "No Blink (>60s)",
+                        "No natural eye blink detected for over 60 seconds",
+                        "Extended no-blink detected",
                     )
 
             if ear < EAR_CLOSED_THRESHOLD:
@@ -700,7 +895,7 @@ def process_frame(bgr, session, face_det, face_mesh):
                             _log(
                                 iris_dir.title(),
                                 f"Candidate showed repeated eye movement ({iris_dir})",
-                                "Please maintain eye contact with the screen center",
+                                "Repeated gaze deviation detected",
                             )
                 else:
                     session.iris_streak_direction = None
@@ -752,6 +947,9 @@ def annotate_frame(frame, results, width, height, face_count, result, session, n
 
     if result.get("eye_state") and result["eye_state"] != "N/A":
         cv2.putText(frame, f"Eye: {result['eye_state']}  Gaze: {result.get('gaze')}", (20, height - 60), font, 0.55, (0, 255, 255), 2)
+
+    if result.get("head_pose"):
+        cv2.putText(frame, f"WARNING: {result['head_pose']}", (20, height - 110), font, 0.65, (0, 165, 255), 2)
 
     if result.get("flags"):
         flags_str = ", ".join(result["flags"])
@@ -1082,3 +1280,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
