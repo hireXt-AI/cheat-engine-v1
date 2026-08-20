@@ -37,6 +37,7 @@ import os
 import time
 from pathlib import Path
 from xmlrpc import server
+import uuid
 
 import cv2
 import numpy as np
@@ -53,7 +54,7 @@ from stream_server import (
     load_reference_encoding,
 )
 
-DEV_SESSION = "dev_session"
+DEV_SESSION = f"session_{int(time.time())}_{uuid.uuid4().hex[:6]}"
 REF_DIR = os.path.join(os.path.dirname(__file__), "references")
 os.makedirs(REF_DIR, exist_ok=True)
 
@@ -526,15 +527,17 @@ class DevHarness:
         if threshold is not None:
             import stream_server as ss
             ss.TRIGGER_THRESHOLD = threshold
+        self.session_id = f"interview_{int(time.time())}_{uuid.uuid4().hex[:6]}"
         self.source = source
         self.fps = max(1, fps)
         self.auto = auto
         self.running = False
         self.clients = set()
+        self.session = ProctorSession(self.session_id)
         self.session = ProctorSession(DEV_SESSION)
         self.latest_frame = None
-        audio_dir = os.path.join(EVIDENCE_DIR, "recordings", DEV_SESSION)
-        audio_path = os.path.join(audio_dir, f"{DEV_SESSION}.wav")
+        audio_dir = os.path.join(EVIDENCE_DIR, "recordings", self.session_id)
+        audio_path = os.path.join(audio_dir, f"{self.session_id}.wav")
         self.audio_recorder = AudioRecorder(audio_path)
         self._cap = None
         self._static_image = None
