@@ -36,10 +36,12 @@ import json
 import os
 import time
 from pathlib import Path
+from xmlrpc import server
 
 import cv2
 import numpy as np
 from aiohttp import web, WSMsgType
+from s3_storage import upload_evidence
 
 import mediapipe as mp
 
@@ -228,7 +230,7 @@ ws.onmessage = (ev) => {
   const msg = JSON.parse(ev.data);
   if (msg.type === 'frame') { $('feed').src = 'data:image/jpeg;base64,' + msg.data; }
   else if (msg.type === 'status') { renderStatus(msg.data); }
-  else if (msg.type === 'alert') { addAlert(msg.data); }
+  else if (msg.type === 'alert') { addAlert(msg); }
   else if (msg.type === 'violation') { addAlert({line: msg.line, kind:'violation'}); }
   else if (msg.type === 'snapshots') { renderSnaps(msg.data); }
   else if (msg.type === 'clear') {
@@ -432,6 +434,90 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 </body>
 </html>
 """
+from stream_server import (
+    ProctorSession,
+)
+
+import signal
+import sys
+
+def signal_handler(sig, frame):
+    print("\n[DEV SERVER] Stopping server gracefully & finalizing video...")
+    if hasattr(server, 'session') and server.session:
+        server.session.finalize_recording()
+    sys.exit(0)
+
+# Main block me server start hone se pehle register karein
+signal.signal(signal.SIGINT, signal_handler)
+
+import threading
+import wave
+
+
+class AudioRecorder:
+
+  def __init__(self, output_path):
+    self.output_path = output_path
+    self.is_recording = False
+    self._thread = None
+
+  def start(self):
+    if self.is_recording:
+      return
+    self.is_recording = True
+    self._thread = threading.Thread(target=self._record, daemon=True)
+    self._thread.start()
+
+  def _record(self):
+    try:
+      import pyaudio
+    except ImportError:
+      print("[AUDIO] PyAudio installed nahi hai! Run: pip install pyaudio")
+      return
+
+    p = pyaudio.PyAudio()
+    try:
+      stream = p.open(
+          format=pyaudio.paInt16,
+          channels=1,
+          rate=44100,
+          input=True,
+          frames_per_buffer=1024,
+      )
+    except Exception as e:
+      print(f"[AUDIO ERROR] Mic open nahi ho paya: {e}")
+      p.terminate()
+      return
+
+    frames = []
+    print("[AUDIO] Mic recording started...")
+    while self.is_recording:
+      try:
+        data = stream.read(1024, exception_on_overflow=False)
+        frames.append(data)
+      except Exception:
+        break
+
+    stream.stop_stream()
+    stream.close()
+
+    os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
+    wf = wave.open(self.output_path, "wb")
+    wf.setnchannels(1)
+    wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
+    wf.setframerate(44100)
+    wf.writeframes(b"".join(frames))
+    wf.close()
+    p.terminate()
+    print(f"[AUDIO] Audio saved: {self.output_path}")
+
+  def stop(self):
+    if not self.is_recording:
+      return
+    self.is_recording = False
+    if self._thread:
+      self._thread.join(timeout=2.0)
+
 
 
 # ── Detection harness ────────────────────────────────────────────────────────
@@ -447,6 +533,9 @@ class DevHarness:
         self.clients = set()
         self.session = ProctorSession(DEV_SESSION)
         self.latest_frame = None
+        audio_dir = os.path.join(EVIDENCE_DIR, "recordings", DEV_SESSION)
+        audio_path = os.path.join(audio_dir, f"{DEV_SESSION}.wav")
+        self.audio_recorder = AudioRecorder(audio_path)
         self._cap = None
         self._static_image = None
         self._face_det = mp.solutions.face_detection.FaceDetection(
@@ -522,6 +611,13 @@ class DevHarness:
             if not self.running:
                 await asyncio.sleep(0.2)
                 continue
+            if not self.audio_recorder.is_recording:
+                    self.audio_recorder.start()
+
+            frame = await asyncio.to_thread(self.read_frame)
+            if frame is None:
+                await asyncio.sleep(0.2)
+                continue
             frame = await asyncio.to_thread(self.read_frame)
             if frame is None:
                 await asyncio.sleep(0.2)
@@ -539,8 +635,17 @@ class DevHarness:
             if ok:
                 self.latest_frame = enc.tobytes()
                 await self.broadcast({"type": "frame", "data": base64.b64encode(enc.tobytes()).decode()})
+                repeat_count = max(1, int(20 / self.fps))
+                for _ in range(repeat_count):
+                 await asyncio.to_thread(self.session.write_video_frame, frame)
 
             status = _json_safe(result)
+            print(
+                "[DEV][STATUS]",
+                "score=", status.get("suspicion_score"),
+                "flags=", status.get("flags"),
+                "trigger=", trigger
+                )
             status["buffered"] = [
                 {"name": k, "count": min(len(v["timestamps"]), 12)}
                 for k, v in self.session.tracker.violations.items()
@@ -585,15 +690,9 @@ class DevHarness:
         return None
 
     async def _emit_trigger(self, trigger):
-        line = (
-            f"[SYSTEM ALERT] Proctoring trigger point reached: {trigger.get('violation')}. "
-            f"AI message to relay to candidate: {trigger.get('aiWarning')}. "
-            f"Current suspicion score: {trigger.get('suspicion_score')}/100. "
-            "Address this naturally within the conversation."
-        )
+        line = trigger.get("aiWarning", "")
         print(f"[DEV][ALERT] {line}")
-        await self.broadcast({"type": "alert", "text": line})
-        await self.broadcast({"type": "alert", "text": "raw trigger: " + json.dumps(trigger, default=str), "kind": "violation"})
+        await self.broadcast({"type": "alert", "text": line, "kind": "violation"})
 
     async def _emit_threshold_alerts(self, status):
         inj = self._agent_injection(status)
@@ -686,6 +785,58 @@ class DevHarness:
             return []
         files = sorted(f for f in os.listdir(d) if f.endswith(".jpg") and f != "reference.jpg")
         return [{"name": f, "url": f"/snapshot/{f}"} for f in files]
+        
+    async def finalize_and_upload(self):
+        """
+        Finalize the recorded video using the same production
+        ProctorSession.finalize_recording() path.
+        """
+        print("[DEV] Stopping audio recording...")
+        self.audio_recorder.stop()
+        await asyncio.sleep(1.0)
+
+        print("\n[DEV] ========================================")
+        print("[DEV] FINALIZING RECORDING")
+        print("[DEV] ========================================")
+
+        try:
+            finalize_method = getattr(
+                self.session,
+                "finalize_recording",
+                None
+            )
+
+            if not callable(finalize_method):
+                print(
+                    "[DEV][ERROR] ProctorSession.finalize_recording() "
+                    "does not exist"
+                )
+                return None
+
+            print("[DEV] Calling ProctorSession.finalize_recording()...")
+
+            result = await asyncio.to_thread(
+                finalize_method
+            )
+
+            if result:
+                print("[DEV] VIDEO FINALIZE/UPLOAD SUCCESS")
+                print(f"[DEV] S3 KEY: {result}")
+                return result
+
+            print(
+                "[DEV][ERROR] finalize_recording() returned None"
+            )
+            return None
+
+        except Exception as e:
+            print("[DEV][ERROR] VIDEO FINALIZE/UPLOAD FAILED")
+            print(f"[DEV][ERROR] {repr(e)}")
+
+            import traceback
+            traceback.print_exc()
+
+            return None
 
 
 # ── HTTP / WebSocket ─────────────────────────────────────────────────────────
@@ -746,6 +897,11 @@ def make_app(harness):
                     elif mtype == "stop":
                         harness.running = False
                         await harness.broadcast({"type": "run", "running": False})
+                        result = await harness.finalize_and_upload()
+                        if result:
+                            await safe_send({"type": "ref", "ok": True, "message": f"Video uploaded to S3: {result}"})
+                        else:
+                            await safe_send({"type": "ref", "ok": False, "message": "Video finalize/upload failed — check console"})
                     elif mtype == "ref_capture":
                         # browser-captured reference image (list of byte ints from data URL)
                         payload = data.get("data")
@@ -863,6 +1019,42 @@ def main():
     print("=" * 60)
 
     web.run_app(app, host="127.0.0.1", port=args.port, print=None)
+
+import asyncio
+import signal
+import sys
+
+
+def signal_handler(sig, frame):
+  print("\n[DEV SERVER] Stopping server gracefully & finalizing video...")
+  try:
+    from stream_server import ProctorSession
+
+    # Safe retrieval using getattr
+    session_obj = getattr(ProctorSession, "LAST_SESSION", None)
+
+    if session_obj and hasattr(session_obj, "finalize_recording"):
+      res = session_obj.finalize_recording()
+      if asyncio.iscoroutine(res):
+        try:
+          loop = asyncio.get_event_loop()
+          if loop.is_running():
+            loop.create_task(res)
+          else:
+            loop.run_until_complete(res)
+        except Exception:
+          asyncio.run(res)
+      print("[DEV SERVER] Video finalized and saved!")
+    else:
+      print("[DEV SERVER ERROR] No active session found to finalize.")
+  except Exception as e:
+    print(f"[DEV SERVER ERROR] Cleanup failed: {repr(e)}")
+
+  print("[DEV SERVER] Exit complete.")
+  sys.exit(0)
+
+
+signal.signal(signal.SIGINT, signal_handler)
 
 
 if __name__ == "__main__":

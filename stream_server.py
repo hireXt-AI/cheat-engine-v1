@@ -39,14 +39,14 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
-from s3_storage import upload_evidence
+
 import cv2
 import numpy as np
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from s3_storage import upload_evidence
+from s3_storage import S3_BUCKET_NAME, upload_evidence
 
 # LiveKit is optional: keep REST/register-face/report working even if the
 # `livekit` package is not installed yet.
@@ -136,9 +136,10 @@ class ProctorSession:
     """Per-session detection state + CSV/trigger tracker."""
 
     def __init__(self, session_id):
+        ProctorSession.LAST_SESSION = self
         self.session_id = session_id
         self.reference_encoding = None
-
+        self.instant_violation_active = set()
         # ViolationTracker writes trigger points to CSV under .evidence
         csv_path = Path(EVIDENCE_DIR) / f"trigger_points_{session_id}.csv"
         self.tracker = ViolationTracker(
@@ -147,7 +148,20 @@ class ProctorSession:
             user_id=f"USER_{session_id}",
             threshold=TRIGGER_THRESHOLD,
         )
+        # Auto-register active session for dev server
+        # Auto-register active session for dev server (Fix for __main__ module)
+        try:
+          import sys
 
+          main_mod = sys.modules.get("__main__")
+          if hasattr(main_mod, "register_active_session"):
+            main_mod.register_active_session(self)
+          else:
+            import dev_server
+
+            dev_server.register_active_session(self)
+        except Exception:
+          pass
         # ── Recording (raw video + audio → combined compressed mp4) ───────
         rec_dir = Path(RECORDING_DIR) / session_id
         rec_dir.mkdir(parents=True, exist_ok=True)
@@ -211,22 +225,160 @@ class ProctorSession:
         self._wav_file.writeframes(pcm_bytes)
 
     def finalize_recording(self, actual_fps=RECORDING_FPS):
-        """Close writers, then mux + compress raw video/audio into one MP4
-        via main.py's combine_audio_video (H.264 CRF28 veryfast + AAC 96k),
-        which also deletes the temporary raw video and WAV files."""
+        """Finalize recording and upload the final video to S3."""
+
         if self.recording_finalized:
+            print(f"[RECORDING] Already finalized: {self.session_id}")
             return
-        self.recording_finalized = True
+
+        
+
+        print("\n[RECORDING] ===============================")
+        print(f"[RECORDING] Finalizing: {self.session_id}")
+
+        # 1. Close video writer
         if self.video_writer is not None:
-            self.video_writer.release()
-            self.video_writer = None
+            try:
+                print("[RECORDING] Closing video writer...")
+                self.video_writer.release()
+            except Exception as e:
+                print(f"[RECORDING] Video writer close error: {e}")
+            finally:
+                self.video_writer = None
+
+        # 2. Close WAV
         if self._wav_file is not None:
-            self._wav_file.close()
-            self._wav_file = None
-        if self.raw_video_path.exists():
-            combine_audio_video(self.raw_video_path, self.audio_path, self.final_video_path, actual_fps)
+            try:
+                print("[RECORDING] Closing audio file...")
+                self._wav_file.close()
+            except Exception as e:
+                print(f"[RECORDING] WAV close error: {e}")
+            finally:
+                self._wav_file = None
 
+        print(f"[RECORDING] Raw video: {self.raw_video_path}")
+        print(f"[RECORDING] Audio: {self.audio_path}")
+        print(f"[RECORDING] Final: {self.final_video_path}")
 
+        if not self.raw_video_path.exists():
+            print("[RECORDING] ERROR: Raw video does not exist")
+            return
+
+        raw_size = self.raw_video_path.stat().st_size
+        print(f"[RECORDING] Raw video size: {raw_size / (1024 * 1024):.2f} MB")
+
+        if raw_size < 1024:
+            print("[RECORDING] ERROR: Raw video is too small / empty")
+            return
+
+        # 3. Create final video
+        try:
+            print("[RECORDING] Creating final MP4...")
+
+            # Audio exists -> combine audio + video
+            if self.audio_path.exists() and self.audio_path.stat().st_size > 1024:
+                print("[RECORDING] Audio found — combining audio + video")
+
+                combine_audio_video(
+                    self.raw_video_path,
+                    self.audio_path,
+                    self.final_video_path,
+                    actual_fps
+                )
+            else:
+                # IMPORTANT:
+                # Audio missing hone par bhi video S3 par jana chahiye
+                print("[RECORDING] WARNING: Audio missing — uploading video only")
+
+                import shutil
+
+                if self.final_video_path.exists():
+                    self.final_video_path.unlink()
+
+                shutil.copy2(
+                    self.raw_video_path,
+                    self.final_video_path
+                )
+
+        except Exception as e:
+            print(f"[RECORDING] COMBINE FAILED: {repr(e)}")
+
+            # FALLBACK:
+            # combine_audio_video fail hua to raw video ko final bana do
+            try:
+                import shutil
+
+                print("[RECORDING] Falling back to raw video...")
+
+                if self.final_video_path.exists():
+                    self.final_video_path.unlink()
+
+                shutil.copy2(
+                    self.raw_video_path,
+                    self.final_video_path
+                )
+
+            except Exception as fallback_error:
+                print(
+                    f"[RECORDING] FALLBACK FAILED: "
+                    f"{repr(fallback_error)}"
+                )
+                return
+
+        # 4. Verify final file
+        if not self.final_video_path.exists():
+            print("[RECORDING] ERROR: Final video was not created")
+            return
+
+        final_size = self.final_video_path.stat().st_size
+
+        print(
+            f"[RECORDING] Final video size: "
+            f"{final_size / (1024 * 1024):.2f} MB"
+        )
+
+        if final_size < 1024:
+            print("[RECORDING] ERROR: Final video is empty")
+            return
+
+        # 5. Upload to S3
+        # 5. Upload to S3
+        try:
+            print("\n" + "=" * 60)
+            print("[S3] UPLOADING INTERVIEW VIDEO TO S3...")
+            print(f"[S3] Local File: {self.final_video_path}")
+            print(f"[S3] Session ID: {self.session_id}")
+            print("=" * 60)
+
+            s3_result = upload_evidence(
+                self.final_video_path,
+                self.session_id
+            )
+
+            if s3_result:
+                print("\n" + "★" * 60)
+                print(" [SUCCESS] VIDEO UPLOADED TO S3 SUCCESSFULLY!")
+                print(f" [SUCCESS] S3 Key: {s3_result}")
+                print("★" * 60 + "\n")
+
+                # Mark finalized ONLY after successful S3 upload
+                self.recording_finalized = True
+                return s3_result
+            else:
+                print("\n[S3 ERROR] Upload failed: upload_evidence returned None")
+                print("[S3] Recording un-finalized to allow retry.\n")
+                return None  
+
+        except Exception as e:
+            print("\n[S3 ERROR] VIDEO UPLOAD FAILED")
+            print(f"[S3 Error]: {repr(e)}\n")
+            return None
+
+        except Exception as e:
+            print("[S3] VIDEO UPLOAD FAILED")
+            print(f"[S3] Error: {repr(e)}")
+            print("[S3] Recording will remain un-finalized so upload can be retried.")
+            return None 
 class LiveKitProctor:
     def __init__(self, session_id, livekit_url, token):
         self.session_id = session_id
@@ -275,6 +427,8 @@ class LiveKitProctor:
     async def _cleanup(self):
         """Deregister the proctor and release resources so the session stops
         appearing in the admin live view once the interview is over."""
+
+        print(f"[PROCTOR] Cleaning up proctor for {self.session_id}")
         try:
             if self._stopped:
                 return
@@ -289,6 +443,7 @@ class LiveKitProctor:
             session = self._session
             if session is not None:
                 await asyncio.to_thread(session.finalize_recording)
+               
             try:
                 await self.room.disconnect()
             except Exception:
@@ -601,66 +756,47 @@ def process_frame(bgr, session, face_det, face_mesh):
 
         ai_warning = f"[system_alert_cheating_engine] - {ai_warning}"
 
-        reached = session.tracker.log_violation(
-            v_type,
-            formatted_time,
-            hr_text,
-            ai_warning,
-            bgr
-        )
+        # These two violations trigger instantly
+        INSTANT_TRIGGER_VIOLATIONS = {
+            "Missing Candidate",
+            "Multiple People Detected",
+        }
 
-        # Snapshot filename carries the actual violation type so the admin
-        # Evidence page shows what was flagged at a glance.
-        clean = v_type.lower().replace(" ", "_").replace(">", "").replace("(", "").replace(")", "").replace("/", "_")
-        clean = (
-            v_type.lower()
-            .replace(" ", "_")
-            .replace(">", "")
-            .replace("(", "")
-            .replace(")", "")
-            .replace("/", "_")
-        )
+        if v_type in INSTANT_TRIGGER_VIOLATIONS:
 
-        snap_name = f"{clean}_{int(now)}.jpg"
-        snap_path = os.path.join(
-            EVIDENCE_DIR,
-            session.session_id,
-            snap_name
-        )
-
-        os.makedirs(os.path.dirname(snap_path), exist_ok=True)
-
-        # Save evidence locally
-        saved = cv2.imwrite(snap_path, bgr)
-
-        if saved:
-            session.add_event(
-                "screenshot",
-                os.path.basename(snap_path)
+            # Save/log the violation normally
+            session.tracker.log_violation(
+                v_type,
+                formatted_time,
+                hr_text,
+                ai_warning,
+                bgr
             )
 
-            print(f"[EVIDENCE] Saved locally: {snap_path}")
-
-            # Upload evidence to S3
-            try:
-                s3_key = upload_evidence(
-                    snap_path,
-                    session.session_id
-                )
-
-                print(f"[S3] Evidence uploaded: {s3_key}")
-
-                session.add_event(
-                    "s3_evidence",
-                    s3_key
-                )
-
-            except Exception as e:
-                # S3 failure should not stop detection
-                print(f"[S3] Upload failed: {e}")
+            # Force instant trigger
+            reached = True
 
         else:
-            print(f"[EVIDENCE] Failed to save snapshot: {snap_path}")
+            # All other violations need threshold = 3
+            reached = session.tracker.log_violation(
+                v_type,
+                formatted_time,
+                hr_text,
+                ai_warning,
+                bgr
+            )
+
+            # These two violations should trigger instantly
+            INSTANT_VIOLATIONS = {
+                "Missing Candidate",
+                "Multiple People Detected",
+            }
+
+            if v_type in INSTANT_VIOLATIONS:
+                if v_type not in session.instant_violation_active:
+                    reached = True
+                    session.instant_violation_active.add(v_type)
+        # Your existing snapshot code remains here...
         if reached:
             trigger = {
                 "violation": v_type,
@@ -669,6 +805,46 @@ def process_frame(bgr, session, face_det, face_mesh):
                 "timestamp": formatted_time,
                 "suspicion_score": round(session.suspicion_score, 1),
             }
+
+            # ─────────────────────────────────────────────
+            # Upload trigger snapshot to S3
+            # ─────────────────────────────────────────────
+            try:
+                snapshot_dir = Path(TRIGGER_DIR) / session.session_id
+                snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+                safe_name = (
+                    v_type.lower()
+                    .replace(" ", "_")
+                    .replace("(", "")
+                    .replace(")", "")
+                    .replace("/", "_")
+                    .replace(":", "_")
+                )
+
+                snapshot_path = (
+                    snapshot_dir /
+                    f"{session.session_id}_{safe_name}_{int(now)}.jpg"
+                )
+
+                cv2.imwrite(str(snapshot_path), bgr)
+
+                print(f"[SNAPSHOT] Saved: {snapshot_path}")
+
+                # Upload to S3
+                s3_result = upload_evidence(
+                    snapshot_path,
+                    session.session_id
+                )
+
+                print(
+                    f"[S3] Snapshot uploaded successfully: "
+                    f"{snapshot_path} -> {s3_result}"
+                )
+
+            except Exception as e:
+                print(f"[S3] Snapshot upload failed: {e}")
+            
     face_box = None
     if face_count > 0:
         det = results.detections[0]
@@ -733,15 +909,16 @@ def process_frame(bgr, session, face_det, face_mesh):
     # ── People count ─────────────────────────────────────────────────────
     if face_count > 1:
         result["flags"].append("multiple_faces")
-        session.bump_score(5)
         session.add_event("multi_face", f"{face_count} faces detected")
-        if now - session.last_snap_time > 0.0:
+        if now - session.last_snap_time > 5.0:      # 0.0 → 5.0
             session.last_snap_time = now
+            session.bump_score(5)                    
             _log(
                 "Multiple People Detected",
                 f"Multiple people detected ({face_count} people)",
-                 "Multiple people detected",
+                "Multiple people detected",
             )
+
     elif face_count == 0:
         session.identity_ok = None
         session.glasses_consecutive_frames = 0
@@ -756,10 +933,10 @@ def process_frame(bgr, session, face_det, face_mesh):
         result["face_gone_duration"] = round(gone_dur, 1)
         if gone_dur > 5:
             result["flags"].append("face_gone_long")
-            session.bump_score(2)
             session.add_event("face_gone", f"{gone_dur:.1f}s")
-            if now - session.last_missing_face_snap_time > 0.0:
+            if now - session.last_missing_face_snap_time > 5.0:   # 0.0 → 5.0
                 session.last_missing_face_snap_time = now
+                session.bump_score(2)                               
                 _log(
                     "Missing Candidate",
                     "Candidate missing from frame",
