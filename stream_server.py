@@ -39,7 +39,7 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
-
+import uuid
 import cv2
 import numpy as np
 from dotenv import load_dotenv
